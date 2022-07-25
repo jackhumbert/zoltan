@@ -122,7 +122,7 @@ impl TypeResolver {
             }
             let struct_ = StructType {
                 name,
-                base: None,
+                base: vec![],
                 members,
                 virtual_methods: vec![],
                 size: size.map(|s| s as usize),

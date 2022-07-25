@@ -186,8 +186,8 @@ impl<'a> DwarfWriter<'a> {
             entry.set(gimli::DW_AT_byte_size, AttributeValue::Data8(size as u64));
         }
 
-        if let Some(base) = struct_.base {
-            let base_ty = self.get_or_define_type(&Type::Struct(base));
+        if let Some(base) = struct_.base.first() {
+            let base_ty = self.get_or_define_type(&Type::Struct(*base));
             let inherit_id = self.unit.add(id, gimli::DW_TAG_inheritance);
             let inherit_entry = self.unit.get_mut(inherit_id);
             inherit_entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(base_ty));
@@ -323,7 +323,7 @@ impl<'a> DwarfWriter<'a> {
         let size = struct_.all_virtual_methods(self.types).count() * POINTER_SIZE;
         entry.set(gimli::DW_AT_byte_size, AttributeValue::Data8(size as u64));
 
-        if let Some(base) = struct_.base.and_then(|id| self.types.structs.get(&id)) {
+        if let Some(base) = struct_.base.first().and_then(|id| self.types.structs.get(&id)) {
             let vtable_id = self.define_vtable(base);
             let inherit_id = self.unit.add(id, gimli::DW_TAG_inheritance);
             let inherit_entry = self.unit.get_mut(inherit_id);
@@ -333,6 +333,7 @@ impl<'a> DwarfWriter<'a> {
 
         let mut i = struct_
             .base
+            .first()
             .and_then(|id| self.types.structs.get(&id))
             .map(|base| base.all_virtual_methods(self.types).count())
             .unwrap_or(0);

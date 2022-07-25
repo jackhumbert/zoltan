@@ -168,19 +168,28 @@ impl TypeResolver {
         size: Option<usize>,
     ) -> Result<StructType> {
         let children = entity.get_children();
-        let base = children
-            .iter()
-            .find(|ent| ent.get_kind() == clang::EntityKind::BaseSpecifier)
-            .and_then(|ent| ent.get_definition())
-            .map(|ent| self.resolve_decl(ent))
-            .transpose()?
-            .and_then(|ty| ty.into_struct().ok());
+        let mut base = vec![];
+        // let base = children
+        //     .iter()
+        //     .find(|ent| ent.get_kind() == clang::EntityKind::BaseSpecifier)
+        //     .and_then(|ent| ent.get_definition())
+        //     .map(|ent| self.resolve_decl(ent))
+        //     .transpose()?
+        //     .and_then(|ty| ty.into_struct().ok());
 
         let mut members = vec![];
         let mut virtual_methods = vec![];
 
         for child in children {
             match child.get_kind() {
+                clang::EntityKind::BaseSpecifier => {
+                    if let Some(base_o) = child.get_definition()
+                    .map(|ent| self.resolve_decl(ent))
+                    .transpose()?
+                    .and_then(|ty| ty.into_struct().ok()) {
+                        base.push(base_o);
+                    }
+                }
                 clang::EntityKind::FieldDecl => {
                     let name = self.get_entity_name(child);
                     let typ = self.resolve_type(child.get_type().unwrap())?;
@@ -193,12 +202,15 @@ impl TypeResolver {
                     })
                 }
                 clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
-                    let name = self.get_entity_name(child);
-                    if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
-                        virtual_methods.push(Method {
-                            name,
-                            typ: typ.clone(),
-                        });
+                    let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
+                    if !is_override {
+                        let name = self.get_entity_name(child);
+                        if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
+                            virtual_methods.push(Method {
+                                name,
+                                typ: typ.clone(),
+                            });
+                        }
                     }
                 }
                 _ => {}
@@ -289,11 +301,11 @@ impl TypeResolver {
         }
 
         full_name
-            .replace('<', "$L")
-            .replace('>', "$R")
-            .replace(',', "$C")
-            .replace('*', "$P")
-            .replace('&', "$F")
+            .replace('<', "_")
+            .replace('>', "")
+            .replace(',', "_")
+            .replace('*', "_p")
+            .replace('&', "_r")
             .replace(' ', "")
             .into()
     }

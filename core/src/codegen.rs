@@ -14,10 +14,16 @@ const HEADER: &str = "\
 pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) -> Result<()> {
     writeln!(output, "{}", HEADER)?;
     for symbol in symbols {
+        // writeln!(
+        //     output,
+        //     "#define {}_ADDR 0x{:X}",
+        //     symbol.name().to_uppercase(),
+        //     symbol.rva()
+        // )?;
         writeln!(
             output,
-            "#define {}_ADDR 0x{:X}",
-            symbol.name().to_uppercase(),
+            "#define {}Addr 0x{:X}",
+            symbol.name(),
             symbol.rva()
         )?;
     }
@@ -60,21 +66,29 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
 
     for (id, struc) in &info.structs {
         writeln!(out)?;
-        writeln!(out, "// START_DECL TYPE")?;
-        writeln!(out, "struct {id} {{}}")?;
+        writeln!(out, "// START_DECL HEADER")?;
+        write!(out, "struct {id} ")?;
+        // if let Some(base) = struc.base {
+        //     write!(out, ": {base} ")?;
+        // }
+        writeln!(out, "{{}}")?;
         writeln!(out, "// END_DECL")?;
 
         if struc.has_virtual_methods(info) {
             writeln!(out)?;
-            writeln!(out, "// START_DECL TYPE")?;
-            writeln!(out, "struct {id}_vtbl {{}}")?;
+            writeln!(out, "// START_DECL HEADER")?;
+            write!(out, "struct {id}_vtbl ")?;
+            // if let Some(base) = struc.base {
+            //     write!(out, ": {base}_vtbl ")?;
+            // }
+            writeln!(out, "{{}}")?;
             writeln!(out, "// END_DECL")?;
         }
     }
 
     for id in info.unions.keys() {
         writeln!(out)?;
-        writeln!(out, "// START_DECL TYPE")?;
+        writeln!(out, "// START_DECL HEADER")?;
         writeln!(out, "union {id} {{}}")?;
         writeln!(out, "// END_DECL")?;
     }
@@ -88,53 +102,60 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         }
         writeln!(out, " {{")?;
         for m in &ty.members {
-            writeln!(out, "{pad}{} = {},", m.name, m.value)?;
+            let name = format!("{}_{}", id.to_string().replace("::", "_"), m.name);
+            writeln!(out, "{pad}{} = {},", name, m.value)?;
         }
         writeln!(out, "}}")?;
         writeln!(out, "// END_DECL")?;
     }
 
     for (id, struc) in &info.structs {
-        writeln!(out)?;
-        writeln!(out, "// START_DECL TYPE")?;
-        write!(out, "struct ")?;
-        if struc.has_virtual_methods(info) {
-            write!(out, "__cppobj ")?;
-        }
-        write!(out, "{id} ")?;
-        if let Some(base) = struc.base {
-            write!(out, ": {base} ")?;
-        }
-        writeln!(out, " {{")?;
-
-        if struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info) {
-            writeln!(out, r#"{pad}{id}_vtbl *__vftable;"#)?;
-        }
-
-        for (i, m) in struc.members.iter().enumerate() {
-            if m.is_bitfield {
-                let bit_size = struc
-                    .members
-                    .get(i + 1)
-                    .and_then(|m| m.bit_offset)
-                    .zip(m.bit_offset)
-                    .map(|(a, b)| a - b)
-                    .unwrap_or(1);
-                writeln!(out, "{pad}{}: {bit_size};", m.typ.name_with_id(&m.name))?;
-            } else {
-                writeln!(out, "{pad}{};", m.typ.name_with_id(&m.name))?;
+        if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
+            writeln!(out)?;
+            writeln!(out, "// START_DECL TYPE")?;
+            write!(out, "struct ")?;
+            if struc.has_virtual_methods(info) {
+                write!(out, "__cppobj ")?;
             }
-        }
-        writeln!(out, "}}")?;
-        writeln!(out, "// END_DECL")?;
+            write!(out, "{id} ")?;
+            if struc.base.len() > 0 {
+                let base = itertools::join(&struc.base, ", ");
+                write!(out, ": {base}")?;
+            }
+            writeln!(out, " {{")?;
 
-        if struc.has_virtual_methods(info) {
+            if struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info) {
+                writeln!(out, r#"{pad}{id}_vtbl *__vftable;"#)?;
+            }
+
+            for (i, m) in struc.members.iter().enumerate() {
+                if m.is_bitfield {
+                    let bit_size = struc
+                        .members
+                        .get(i + 1)
+                        .and_then(|m| m.bit_offset)
+                        .zip(m.bit_offset)
+                        .map(|(a, b)| a - b)
+                        .unwrap_or(1);
+                    writeln!(out, "{pad}{}: {bit_size};", m.typ.name_with_id(&m.name))?;
+                } else {
+                    writeln!(out, "{pad}{};", m.typ.name_with_id(&m.name))?;
+                }
+            }
+            writeln!(out, "}}")?;
+            writeln!(out, "// END_DECL")?;
+        }
+
+        if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)  {
             writeln!(out)?;
             writeln!(out, "// START_DECL TYPE")?;
             write!(out, "struct {id}_vtbl ")?;
-            if let Some(base) = struc.base {
-                write!(out, ": {base}_vtbl ")?;
-            }
+            // if struc.base.len() > 0 {
+                // let base = itertools::join(&struc.base, ", ");
+               if let Some(base) = struc.base.first() {
+                write!(out, ": {base}_vtbl")?;
+               }
+            // }
             writeln!(out, "{{")?;
             for m in &struc.virtual_methods {
                 if m.typ.params.is_empty() {

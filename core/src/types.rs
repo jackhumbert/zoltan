@@ -167,7 +167,7 @@ impl DataMember {
 #[derive(Debug)]
 pub struct StructType {
     pub name: Ustr,
-    pub base: Option<StructId>,
+    pub base: Vec<StructId>,
     pub members: Vec<DataMember>,
     pub virtual_methods: Vec<Method>,
     pub size: Option<usize>,
@@ -177,7 +177,7 @@ impl StructType {
     pub fn stub(name: Ustr) -> Self {
         Self {
             name,
-            base: None,
+            base: vec![],
             members: vec![],
             virtual_methods: vec![],
             size: None,
@@ -190,6 +190,7 @@ impl StructType {
 
     pub fn has_indirect_virtual_methods(&self, types: &TypeInfo) -> bool {
         self.base
+            .first()
             .and_then(|id| types.structs.get(&id))
             .iter()
             .any(|typ| typ.has_virtual_methods(types))
@@ -201,7 +202,7 @@ impl StructType {
 
     #[auto_enum(Iterator)]
     pub fn all_members<'a>(&'a self, types: &'a TypeInfo) -> impl Iterator<Item = &'a DataMember> {
-        match self.base.and_then(|id| types.structs.get(&id)) {
+        match self.base.first().and_then(|id| types.structs.get(&id)) {
             Some(typ) => {
                 Box::new(typ.all_members(types).chain(self.members.iter())) as Box<dyn Iterator<Item = _>>
             }
@@ -211,7 +212,7 @@ impl StructType {
 
     #[auto_enum(Iterator)]
     pub fn all_virtual_methods<'a>(&'a self, types: &'a TypeInfo) -> impl Iterator<Item = &'a Method> {
-        match self.base.and_then(|id| types.structs.get(&id)) {
+        match self.base.first().and_then(|id| types.structs.get(&id)) {
             Some(typ) => Box::new(typ.all_virtual_methods(types).chain(self.virtual_methods.iter()))
                 as Box<dyn Iterator<Item = _>>,
             None => self.virtual_methods.iter(),
