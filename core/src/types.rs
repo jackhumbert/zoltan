@@ -169,6 +169,7 @@ pub struct StructType {
     pub name: Ustr,
     pub base: Vec<StructId>,
     pub members: Vec<DataMember>,
+    pub rva: u64,
     pub virtual_methods: Vec<Method>,
     pub size: Option<usize>,
 }
@@ -179,6 +180,7 @@ impl StructType {
             name,
             base: vec![],
             members: vec![],
+            rva: 0,
             virtual_methods: vec![],
             size: None,
         }
@@ -224,6 +226,7 @@ impl StructType {
 pub struct Method {
     pub name: Ustr,
     pub typ: Rc<FunctionType>,
+    pub offset: u64
 }
 
 #[derive(Debug)]

@@ -120,10 +120,12 @@ impl TypeResolver {
                 let typ = self.resolve_type(&var.ctype)?;
                 members.push(DataMember::basic(name, typ));
             }
+            let rva = 0;
             let struct_ = StructType {
                 name,
                 base: vec![],
                 members,
+                rva,
                 virtual_methods: vec![],
                 size: size.map(|s| s as usize),
             };

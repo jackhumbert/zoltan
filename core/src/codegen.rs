@@ -177,6 +177,34 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             }
             writeln!(out, "}}")?;
             writeln!(out, "// END_DECL")?;
+
+            if struc.rva != 0 {
+                for m in &struc.virtual_methods {
+                    let rva = struc.rva + m.offset;
+                    // let rva = m.offset;
+                    writeln!(out)?;
+                    writeln!(out, "// START_DECL VFT {rva}")?;
+                    let safe_id = id.to_string().replace("::", "_").replace("~", "_");
+                    let safe_name = m.name.replace("~", "_");
+                    if m.typ.params.is_empty() {
+                        writeln!(
+                            out,
+                            "typedef {} {safe_id}_{}({id} *__hidden this);",
+                            m.typ.return_type.name(),
+                            safe_name,
+                        )?;
+                    } else {
+                        writeln!(
+                            out,
+                            "typedef {} {safe_id}_{}({id} *__hidden this, {});",
+                            m.typ.return_type.name(),
+                            safe_name,
+                            m.typ.params.iter().map(Type::name).format(", "),
+                        )?;
+                    }
+                    writeln!(out, "// END_DECL")?;
+                }
+            }
         }
     }
 

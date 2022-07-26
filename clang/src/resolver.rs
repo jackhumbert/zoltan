@@ -179,6 +179,16 @@ impl TypeResolver {
 
         let mut members = vec![];
         let mut virtual_methods = vec![];
+        let mut rva = 0;
+        // if let Some(cmt) = entity.get_comment_brief() {
+        //     log::info!("{name}: {}", cmt);
+        //     if let Ok(v) = cmt.trim().trim_start_matches("RVA=").parse() {
+        //         rva = v;
+        //     }
+        // }
+
+        let mut vft_base = 0;
+        let mut vft_index = 0;
 
         for child in children {
             match child.get_kind() {
@@ -188,6 +198,20 @@ impl TypeResolver {
                     .transpose()?
                     .and_then(|ty| ty.into_struct().ok()) {
                         base.push(base_o);
+                    }
+                    if vft_base == 0 {
+                        vft_base = self.get_vft_base(child);
+                    }
+                }
+                clang::EntityKind::VarDecl => {
+                    let var_name = self.get_entity_name(child);
+                    if var_name == "VFT_RVA" {
+                        match child.evaluate() {
+                            Some(clang::EvaluationResult::UnsignedInteger(u)) => {
+                                rva = u;
+                            },
+                            _ => unreachable!(),
+                        }
                     }
                 }
                 clang::EntityKind::FieldDecl => {
@@ -205,10 +229,13 @@ impl TypeResolver {
                     let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
                     if !is_override {
                         let name = self.get_entity_name(child);
+                        let offset = (vft_base + vft_index) as u64;
+                        vft_index += 8;
                         if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
                             virtual_methods.push(Method {
                                 name,
                                 typ: typ.clone(),
+                                offset
                             });
                         }
                     }
@@ -220,9 +247,35 @@ impl TypeResolver {
             name,
             base,
             members,
+            rva,
             virtual_methods,
             size,
         })
+    }
+
+    fn get_vft_base(&mut self, entity : clang::Entity) -> u64 {
+        if let Some(def) = entity.get_definition() {
+            let mut vft_base = 0;
+            for child in def.get_children() {
+                match child.get_kind() {
+                    clang::EntityKind::BaseSpecifier => {
+                        if vft_base == 0 {
+                            vft_base += self.get_vft_base(child);
+                        }
+                    },
+                    clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
+                        let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
+                        if !is_override {
+                            vft_base += 8;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            vft_base as u64
+        } else {
+            0
+        }
     }
 
     fn resolve_enum(&mut self, name: Ustr, entity: clang::Entity) -> Result<EnumType> {
