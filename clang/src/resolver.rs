@@ -179,6 +179,7 @@ impl TypeResolver {
 
         let mut members = vec![];
         let mut virtual_methods = vec![];
+        let mut overridden_virtual_methods = vec![];
         let mut rva = 0;
         // if let Some(cmt) = entity.get_comment_brief() {
         //     log::info!("{name}: {}", cmt);
@@ -186,7 +187,7 @@ impl TypeResolver {
         //         rva = v;
         //     }
         // }
-
+        let mut base_entity = None;
         let mut vft_base = 0;
         let mut vft_index = 0;
 
@@ -201,6 +202,7 @@ impl TypeResolver {
                     }
                     if vft_base == 0 {
                         vft_base = self.get_vft_base(child);
+                        base_entity = Some(child);
                     }
                 }
                 clang::EntityKind::VarDecl => {
@@ -210,7 +212,7 @@ impl TypeResolver {
                             Some(clang::EvaluationResult::UnsignedInteger(u)) => {
                                 rva = u;
                             },
-                            _ => unreachable!(),
+                            _ => {},
                         }
                     }
                 }
@@ -227,13 +229,27 @@ impl TypeResolver {
                 }
                 clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
                     let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
-                    if !is_override {
-                        let name = self.get_entity_name(child);
+                    let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
+                    let func_name = self.get_entity_name(child);
+                    if is_override || is_final {
+                        if let Some(be) = base_entity {
+                            let (found, offset) = self.get_func_vft_offset(be, func_name);
+                            if found {
+                                if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
+                                    overridden_virtual_methods.push(Method {
+                                        name: func_name,
+                                        typ: typ.clone(),
+                                        offset
+                                    });
+                                }
+                            }
+                        }
+                    } else {
                         let offset = (vft_base + vft_index) as u64;
                         vft_index += 8;
                         if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
                             virtual_methods.push(Method {
-                                name,
+                                name: func_name,
                                 typ: typ.clone(),
                                 offset
                             });
@@ -249,6 +265,7 @@ impl TypeResolver {
             members,
             rva,
             virtual_methods,
+            overridden_virtual_methods,
             size,
         })
     }
@@ -275,6 +292,45 @@ impl TypeResolver {
             vft_base as u64
         } else {
             0
+        }
+    }
+
+    fn get_func_vft_offset(&mut self, entity : clang::Entity, name: Ustr) -> (bool, u64) {
+        if let Some(def) = entity.get_definition() {
+            let mut found = false;
+            let mut vft_offset = 0;
+            for child in def.get_children() {
+                match child.get_kind() {
+                    clang::EntityKind::BaseSpecifier => {
+                        if vft_offset == 0 {
+                            let (base_found, offset) = self.get_func_vft_offset(child, name);
+                            if base_found {
+                                found = true;
+                                vft_offset = offset;
+                                break;
+                            } else {
+                                vft_offset += offset
+                            }
+                        }
+                    },
+                    clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
+                        let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
+                        if !is_override {
+                            let child_name = self.get_entity_name(child);
+                            if child_name == name {
+                                found = true;
+                                break;
+                            } else {
+                                vft_offset += 8;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (found, vft_offset as u64)
+        } else {
+            (false, 0)
         }
     }
 

@@ -110,6 +110,8 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
     }
 
     for (id, struc) in &info.structs {
+        let safe_id = id.to_string().replace("::", "_").replace("~", "_");
+
         if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
             writeln!(out)?;
             writeln!(out, "// START_DECL TYPE")?;
@@ -146,6 +148,13 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             writeln!(out, "// END_DECL")?;
         }
 
+        if struc.rva != 0 {
+            writeln!(out)?;
+            writeln!(out, "// START_DECL VTABLE {}", struc.rva)?;
+            writeln!(out, "{safe_id}")?;
+            writeln!(out, "// END_DECL")?;
+        }
+
         if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)  {
             writeln!(out)?;
             writeln!(out, "// START_DECL TYPE")?;
@@ -179,12 +188,35 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             writeln!(out, "// END_DECL")?;
 
             if struc.rva != 0 {
+                for m in &struc.overridden_virtual_methods {
+                    let rva = struc.rva + m.offset;
+                    // let rva = m.offset;
+                    writeln!(out)?;
+                    writeln!(out, "// START_DECL VFUNC {rva}")?;
+                    let safe_name = m.name.replace("~", "_");
+                    if m.typ.params.is_empty() {
+                        writeln!(
+                            out,
+                            "typedef {} {safe_id}_{}({id} *__hidden this);",
+                            m.typ.return_type.name(),
+                            safe_name,
+                        )?;
+                    } else {
+                        writeln!(
+                            out,
+                            "typedef {} {safe_id}_{}({id} *__hidden this, {});",
+                            m.typ.return_type.name(),
+                            safe_name,
+                            m.typ.params.iter().map(Type::name).format(", "),
+                        )?;
+                    }
+                    writeln!(out, "// END_DECL")?;
+                }
                 for m in &struc.virtual_methods {
                     let rva = struc.rva + m.offset;
                     // let rva = m.offset;
                     writeln!(out)?;
-                    writeln!(out, "// START_DECL VFT {rva}")?;
-                    let safe_id = id.to_string().replace("::", "_").replace("~", "_");
+                    writeln!(out, "// START_DECL VFUNC {rva}")?;
                     let safe_name = m.name.replace("~", "_");
                     if m.typ.params.is_empty() {
                         writeln!(

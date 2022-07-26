@@ -171,6 +171,7 @@ pub struct StructType {
     pub members: Vec<DataMember>,
     pub rva: u64,
     pub virtual_methods: Vec<Method>,
+    pub overridden_virtual_methods: Vec<Method>,
     pub size: Option<usize>,
 }
 
@@ -182,6 +183,7 @@ impl StructType {
             members: vec![],
             rva: 0,
             virtual_methods: vec![],
+            overridden_virtual_methods: vec![],
             size: None,
         }
     }

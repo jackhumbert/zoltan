@@ -127,6 +127,7 @@ impl TypeResolver {
                 members,
                 rva,
                 virtual_methods: vec![],
+                overridden_virtual_methods: vec![],
                 size: size.map(|s| s as usize),
             };
             self.structs.insert(name.into(), struct_);
