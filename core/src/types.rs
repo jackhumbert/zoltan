@@ -167,6 +167,7 @@ impl DataMember {
 #[derive(Debug)]
 pub struct StructType {
     pub name: Ustr,
+    pub nice_name: Option<Ustr>,
     pub base: Vec<StructId>,
     pub members: Vec<DataMember>,
     pub rva: u64,
@@ -179,6 +180,7 @@ impl StructType {
     pub fn stub(name: Ustr) -> Self {
         Self {
             name,
+            nice_name: None,
             base: vec![],
             members: vec![],
             rva: 0,

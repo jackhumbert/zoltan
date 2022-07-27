@@ -46,10 +46,23 @@ impl TypeResolver {
                     self.structs.insert(name.into(), StructType::stub(name));
 
                     let size = entity.get_type().and_then(|t| t.get_sizeof().ok());
-                    let res = if let Some(template) = entity.get_template() {
-                        self.resolve_struct(name, template, size)?
+                    let mut res;
+                    if let Some(template) = entity.get_template() {
+                        res = self.resolve_struct(name, template, size).unwrap();
+                        if name.to_string().starts_with("RED4ext::Handle") {
+                            if let Some(typ) = self.get_template_type(entity) {
+                                res.base.clear();
+                                res.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
+                                if let Some(ref_cnt_typ) = self.local_types.get(&Ustr::from("RED4ext::RefCnt")) {
+                                    let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
+                                    res.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(ref_cnt_rc), bit_offset: Some(8), is_bitfield: false });
+                                } else {
+                                    res.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
+                                }
+                            }
+                        }
                     } else {
-                        self.resolve_struct(name, entity, size)?
+                        res = self.resolve_struct(name, entity, size).unwrap();
                     };
                     self.structs.insert(name.into(), res);
                 }
@@ -72,6 +85,49 @@ impl TypeResolver {
             }
             other => Err(Error::UnexpectedKind(other)),
         }
+    }
+
+    pub fn get_template_type(&mut self, entity: clang::Entity) -> Option<Type> {
+        let mut p_type: Option<Type> = None;
+        if let Some(e_typ) = entity.get_type() {
+        if let Some(args) = e_typ.get_template_argument_types() {
+            // log::info!("get_template_arguments");
+            // match args.first() {
+            //     Some(clang::TemplateArgument::Type(typ)) => {
+            //         log::info!("first && Type");
+            //         p_type = self.resolve_type(*typ).ok();
+            //     },
+            //     Some(_) => {
+            //         log::info!("first && other");
+            //     },
+            //     None => {}
+            // }
+            // self.local_types.push_layer();
+
+            let decl = e_typ.get_declaration().unwrap();
+            let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
+                decl
+            } else {
+                decl.get_template().unwrap()
+            };
+
+            for (ent, typ) in template
+                .get_children()
+                .iter()
+                .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTypeParameter)
+                .zip(&args)
+            {
+                if let Some(typ) = typ {
+                    let typ = self.resolve_type(*typ).unwrap();
+                    self.local_types
+                        .define(ent.get_name_raw().unwrap().as_str().into(), typ.clone());
+                    p_type = Some(typ);
+                    break;
+                }
+            }
+        }
+    }
+        return p_type;
     }
 
     pub fn resolve_type(&mut self, typ: clang::Type) -> Result<Type> {
@@ -190,6 +246,7 @@ impl TypeResolver {
         let mut base_entity = None;
         let mut vft_base = 0;
         let mut vft_index = 0;
+        let mut nice_name: Option<Ustr> = None;
 
         for child in children {
             match child.get_kind() {
@@ -211,6 +268,13 @@ impl TypeResolver {
                         match child.evaluate() {
                             Some(clang::EvaluationResult::UnsignedInteger(u)) => {
                                 rva = u;
+                            },
+                            _ => {},
+                        }
+                    } else if var_name == "NAME" {
+                        match child.evaluate() {
+                            Some(clang::EvaluationResult::String(s)) => {
+                                nice_name = Some(s.to_str().unwrap().into());
                             },
                             _ => {},
                         }
@@ -261,6 +325,7 @@ impl TypeResolver {
         }
         Ok(StructType {
             name,
+            nice_name,
             base,
             members,
             rva,
@@ -282,7 +347,8 @@ impl TypeResolver {
                     },
                     clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
                         let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
-                        if !is_override {
+                        let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
+                        if !is_override && !is_final {
                             vft_base += 8;
                         }
                     }
@@ -315,7 +381,8 @@ impl TypeResolver {
                     },
                     clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
                         let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
-                        if !is_override {
+                        let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
+                        if !is_override && !is_final {
                             let child_name = self.get_entity_name(child);
                             if child_name == name {
                                 found = true;

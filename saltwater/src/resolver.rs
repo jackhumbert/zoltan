@@ -123,6 +123,7 @@ impl TypeResolver {
             let rva = 0;
             let struct_ = StructType {
                 name,
+                nice_name: None,
                 base: vec![],
                 members,
                 rva,

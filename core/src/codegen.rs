@@ -110,7 +110,12 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
     }
 
     for (id, struc) in &info.structs {
-        let safe_id = id.to_string().replace("::", "_").replace("~", "_");
+        let safe_id;
+        if let Some(nice_name) = struc.nice_name {
+            safe_id = nice_name.to_string();
+        } else {
+            safe_id = id.to_string().replace("::", "_").replace("~", "_");
+        } 
 
         if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
             writeln!(out)?;
