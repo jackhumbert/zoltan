@@ -133,7 +133,7 @@ pub struct EnumId(Ustr);
 
 pub type TypeMap<K, V> = HashMap<K, V, BuildHasherDefault<IdentityHasher>>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionType {
     pub params: Vec<Type>,
     pub return_type: Type,
@@ -143,7 +143,10 @@ impl FunctionType {
     pub fn new(params: Vec<Type>, return_type: Type) -> Self {
         Self { params, return_type }
     }
-}
+    pub fn new_vft(parent: Type, params: Vec<Type>, return_type: Type) -> Self {
+        Self { params: vec![vec![parent], params].concat(), return_type }
+    }
+} 
 
 #[derive(Debug)]
 pub struct DataMember {

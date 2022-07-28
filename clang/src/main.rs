@@ -48,6 +48,7 @@ fn run(opts: &Opts) -> Result<()> {
 
     let mut resolver = TypeResolver::new(opts.strip_namespaces);
     let mut entities = vec![];
+    let mut functions = vec![];
 
     unit.get_entity().visit_children(|ent, _| {
         let is_project_file = ent
@@ -58,19 +59,29 @@ fn run(opts: &Opts) -> Result<()> {
             == Some(&opts.source_path);
 
         match ent.get_kind() {
-            EntityKind::Namespace if is_project_file => EntityVisitResult::Recurse,
-            EntityKind::TypedefDecl | EntityKind::TypeAliasDecl if is_project_file => {
+            EntityKind::Namespace => EntityVisitResult::Recurse,
+            EntityKind::TypedefDecl | EntityKind::TypeAliasDecl if is_project_file || ent.get_comment().is_some() => {
                 entities.push(ent);
                 EntityVisitResult::Continue
             }
+            EntityKind::Method | EntityKind::FunctionDecl => {
+                // if let Some(name) = ent.get_name() {
+                //     if name == "GetVehDriveModelDataAI" {
+                //         log::info!("{}", name);
+                //     }
+                // }
+                functions.push(ent);
+                EntityVisitResult::Continue
+            },
             EntityKind::StructDecl
             | EntityKind::ClassDecl
             | EntityKind::UnionDecl
-            | EntityKind::EnumDecl
-                if opts.eager_type_export =>
+            | EntityKind::EnumDecl =>
             {
-                resolver.resolve_decl(ent).ok();
-                EntityVisitResult::Continue
+                if opts.eager_type_export {
+                    resolver.resolve_decl(ent).ok();
+                }
+                EntityVisitResult::Recurse
             }
             _ => EntityVisitResult::Continue,
         }
@@ -82,6 +93,30 @@ fn run(opts: &Opts) -> Result<()> {
             if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let name = ent.get_name_raw().unwrap().as_str().into();
                 if let Some(spec) = FunctionSpec::new(name, typ, comment.as_str().lines()) {
+                    specs.push(spec?);
+                }
+            }
+        }
+    }
+    for ent in functions {
+        if let Some(comment) = ent.get_comment() {
+            if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
+                let mut name = ent.get_name_raw().unwrap().as_str().to_owned();
+                let mut alt_typ = typ.to_owned();
+                let mut params = vec![];
+                if let Some(parent) = ent.get_lexical_parent() {
+                    if let Some(parent_name) = resolver.get_red_name(parent) {
+                        name = format!("{}_{}", parent_name, name);
+                    }
+                    if let Some(parent_type) = parent.get_type() {
+                        if let Some(parent_typ) = resolver.resolve_type(parent_type).ok() {
+                            params.push(Type::Pointer(parent_typ.into()));
+                            params = [params, typ.params.clone()].concat();
+                            alt_typ = zoltan::types::FunctionType::new(params, typ.return_type.clone()).into();
+                        }
+                    }
+                }
+                if let Some(spec) = FunctionSpec::new(name.into(), alt_typ, comment.lines()) {
                     specs.push(spec?);
                 }
             }

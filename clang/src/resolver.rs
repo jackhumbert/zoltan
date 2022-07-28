@@ -335,6 +335,27 @@ impl TypeResolver {
         })
     }
 
+    pub fn get_red_name(&mut self, entity : clang::Entity) -> Option<String> {
+        let mut red_name: Option<String> = None;
+        for child in entity.get_children() {
+            match child.get_kind() {
+                clang::EntityKind::VarDecl => {
+                    let var_name = self.get_entity_name(child);
+                    if var_name == "NAME" {
+                        match child.evaluate() {
+                            Some(clang::EvaluationResult::String(s)) => {
+                                red_name = Some(s.to_str().unwrap().into());
+                            },
+                            _ => {},
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+        red_name
+    }
+
     fn get_vft_base(&mut self, entity : clang::Entity) -> u64 {
         if let Some(def) = entity.get_definition() {
             let mut vft_base = 0;
