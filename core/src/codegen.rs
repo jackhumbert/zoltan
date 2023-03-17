@@ -31,6 +31,21 @@ pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) -> Re
     Ok(())
 }
 
+// pub fn write_r4e_files<W: Write>(path: W, symbols: &[FunctionSymbol]) -> Result<()> {
+//     let mut output = std::fs::File::create(path)?;
+//     writeln!(output, "{}", HEADER)?;
+//     for symbol in symbols {
+//         writeln!(
+//             output,
+//             "#define {}Addr 0x{:X}",
+//             symbol.name(),
+//             symbol.rva()
+//         )?;
+//     }
+
+//     Ok(())
+// }
+
 pub fn write_rust_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) -> Result<()> {
     writeln!(output, "{}", HEADER)?;
     for symbol in symbols {
@@ -102,7 +117,7 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         }
         writeln!(out, " {{")?;
         for m in &ty.members {
-            let name = format!("{}_{}", id.to_string().replace("::", "_"), m.name);
+            let name = format!("{}_{}", id.to_string().replace("RED4ext", "").replace("::", ""), m.name);
             writeln!(out, "{pad}{} = {},", name, m.value)?;
         }
         writeln!(out, "}}")?;
@@ -114,7 +129,7 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         if let Some(nice_name) = struc.nice_name {
             safe_id = nice_name.to_string();
         } else {
-            safe_id = id.to_string().replace("::", "_").replace("~", "_");
+            safe_id = id.to_string().replace("RED4ext", "").replace("::", "").replace("~", "__");
         } 
 
         if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
@@ -172,19 +187,20 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             // }
             writeln!(out, "{{")?;
             for m in &struc.virtual_methods {
+                let safe_name = m.name.replace("~", "__");
                 if m.typ.params.is_empty() {
                     writeln!(
                         out,
                         "{pad}{} (*{})({id} *__hidden this);",
                         m.typ.return_type.name(),
-                        m.name,
+                        safe_name,
                     )?;
                 } else {
                     writeln!(
                         out,
                         "{pad}{} (*{})({id} *__hidden this, {});",
                         m.typ.return_type.name(),
-                        m.name,
+                        safe_name,
                         m.typ.params.iter().map(Type::name).format(", "),
                     )?;
                 }
@@ -198,18 +214,18 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
                     // let rva = m.offset;
                     writeln!(out)?;
                     writeln!(out, "// START_DECL VFUNC {rva}")?;
-                    let safe_name = m.name.replace("~", "_");
+                    let safe_name = m.full_name.replace("~", "__");
                     if m.typ.params.is_empty() {
                         writeln!(
                             out,
-                            "typedef {} {safe_id}_{}({id} *__hidden this);",
+                            "typedef {} {}({id} *__hidden this);",
                             m.typ.return_type.name(),
                             safe_name,
                         )?;
                     } else {
                         writeln!(
                             out,
-                            "typedef {} {safe_id}_{}({id} *__hidden this, {});",
+                            "typedef {} {}({id} *__hidden this, {});",
                             m.typ.return_type.name(),
                             safe_name,
                             m.typ.params.iter().map(Type::name).format(", "),
@@ -222,18 +238,18 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
                     // let rva = m.offset;
                     writeln!(out)?;
                     writeln!(out, "// START_DECL VFUNC {rva}")?;
-                    let safe_name = m.name.replace("~", "_");
+                    let safe_name = m.full_name.replace("~", "__");
                     if m.typ.params.is_empty() {
                         writeln!(
                             out,
-                            "typedef {} {safe_id}_{}({id} *__hidden this);",
+                            "typedef {} {}({id} *__hidden this);",
                             m.typ.return_type.name(),
                             safe_name,
                         )?;
                     } else {
                         writeln!(
                             out,
-                            "typedef {} {safe_id}_{}({id} *__hidden this, {});",
+                            "typedef {} {}({id} *__hidden this, {});",
                             m.typ.return_type.name(),
                             safe_name,
                             m.typ.params.iter().map(Type::name).format(", "),

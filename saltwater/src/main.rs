@@ -53,7 +53,7 @@ fn run(opts: &Opts) -> Result<()> {
                 .take_while(|str| str.starts_with("///"));
 
             if let Type::Function(fn_type) = resolver.resolve_type(function_type)? {
-                if let Some(spec) = FunctionSpec::new(get_str!(var.id).into(), fn_type, comments) {
+                if let Some(spec) = FunctionSpec::new(get_str!(var.id).into(), get_str!(var.id).into(), fn_type, comments) {
                     specs.push(spec?);
                 }
             }

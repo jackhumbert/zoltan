@@ -64,7 +64,7 @@ fn run(opts: &Opts) -> Result<()> {
                 entities.push(ent);
                 EntityVisitResult::Continue
             }
-            EntityKind::Method | EntityKind::FunctionDecl => {
+            EntityKind::Method | EntityKind::FunctionDecl | EntityKind::Constructor | EntityKind::Destructor => {
                 // if let Some(name) = ent.get_name() {
                 //     if name == "GetVehDriveModelDataAI" {
                 //         log::info!("{}", name);
@@ -92,7 +92,7 @@ fn run(opts: &Opts) -> Result<()> {
         if let Some(comment) = ent.get_comment_raw() {
             if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let name = ent.get_name_raw().unwrap().as_str().into();
-                if let Some(spec) = FunctionSpec::new(name, typ, comment.as_str().lines()) {
+                if let Some(spec) = FunctionSpec::new(name, name, typ, comment.as_str().lines()) {
                     specs.push(spec?);
                 }
             }
@@ -102,11 +102,21 @@ fn run(opts: &Opts) -> Result<()> {
         if let Some(comment) = ent.get_comment() {
             if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let mut name = ent.get_name_raw().unwrap().as_str().to_owned();
+                let mut full_name = name.clone();
                 let mut alt_typ = typ.to_owned();
                 let mut params = vec![];
                 if let Some(parent) = ent.get_lexical_parent() {
-                    if let Some(parent_name) = resolver.get_red_name(parent) {
-                        name = format!("{}_{}", parent_name, name);
+                    let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
+                    let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
+                    if let Some(mut parent_name) = resolver.get_red_name(parent).or(Some(resolver.generate_type_name(parent).to_string())) {
+                        parent_name = parent_name.replace("RED4ext", "").replace("::", "").into();
+                        if is_constructor {
+                            full_name = parent_name;
+                        } else if is_destructor {
+                            full_name = format!("__{}", parent_name);
+                        } else {
+                            name = format!("{}_{}", parent_name, name);
+                        }
                     }
                     if let Some(parent_type) = parent.get_type() {
                         if let Some(parent_typ) = resolver.resolve_type(parent_type).ok() {
@@ -116,7 +126,7 @@ fn run(opts: &Opts) -> Result<()> {
                         }
                     }
                 }
-                if let Some(spec) = FunctionSpec::new(name.into(), alt_typ, comment.lines()) {
+                if let Some(spec) = FunctionSpec::new(name.into(), full_name.into(), alt_typ, comment.lines()) {
                     specs.push(spec?);
                 }
             }

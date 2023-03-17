@@ -53,6 +53,9 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     if let Some(path) = &opts.c_output_path {
         codegen::write_c_header(File::create(path)?, &syms)?;
     }
+    // if let Some(path) = &opts.r4e_output_path {
+    //     codegen::write_r4e_files(path, &syms)?;
+    // }
     if let Some(path) = &opts.rust_output_path {
         codegen::write_rust_header(File::create(path)?, &syms)?;
     }

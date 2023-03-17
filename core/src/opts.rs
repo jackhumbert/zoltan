@@ -6,6 +6,7 @@ pub struct Opts {
     pub exe_path: PathBuf,
     pub dwarf_output_path: Option<PathBuf>,
     pub c_output_path: Option<PathBuf>,
+    pub r4e_output_path: Option<PathBuf>,
     pub rust_output_path: Option<PathBuf>,
     pub idc_output_path: Option<PathBuf>,
     pub strip_namespaces: bool,
@@ -28,6 +29,11 @@ impl Opts {
         let c_output_path = long("c-output")
             .help("C header with offsets to write")
             .argument_os("C")
+            .map(PathBuf::from)
+            .optional();
+        let r4e_output_path = long("r4e-output")
+            .help("red4ext relocation implementations")
+            .argument_os("R4E")
             .map(PathBuf::from)
             .optional();
         let idc_output_path = long("idc-output")
@@ -58,6 +64,7 @@ impl Opts {
             exe_path,
             dwarf_output_path,
             c_output_path,
+            r4e_output_path,
             idc_output_path,
             rust_output_path,
             strip_namespaces,

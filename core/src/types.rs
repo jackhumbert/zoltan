@@ -232,6 +232,7 @@ impl StructType {
 #[derive(Debug)]
 pub struct Method {
     pub name: Ustr,
+    pub full_name: Ustr,
     pub typ: Rc<FunctionType>,
     pub offset: u64
 }

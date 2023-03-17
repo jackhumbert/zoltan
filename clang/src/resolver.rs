@@ -46,25 +46,31 @@ impl TypeResolver {
                     self.structs.insert(name.into(), StructType::stub(name));
 
                     let size = entity.get_type().and_then(|t| t.get_sizeof().ok());
-                    let mut res;
+                    let mut ent = None;
                     if let Some(template) = entity.get_template() {
-                        res = self.resolve_struct(name, template, size).unwrap();
-                        if name.to_string().starts_with("RED4ext::Handle") {
-                            if let Some(typ) = self.get_template_type(entity) {
-                                res.base.clear();
-                                res.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
-                                if let Some(ref_cnt_typ) = self.local_types.get(&Ustr::from("RED4ext::RefCnt")) {
-                                    let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
-                                    res.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(ref_cnt_rc), bit_offset: Some(8), is_bitfield: false });
-                                } else {
-                                    res.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
+                        let res = self.resolve_struct(name, template, size);
+                        if res.is_ok() {
+                            let mut strt = res.unwrap();
+                            if name.to_string().starts_with("RED4ext::Handle") {
+                                if let Some(typ) = self.get_template_type(entity) {
+                                    strt.base.clear();
+                                    strt.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
+                                    if let Some(ref_cnt_typ) = self.local_types.get(&Ustr::from("RED4ext::RefCnt")) {
+                                        let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
+                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(ref_cnt_rc), bit_offset: Some(8), is_bitfield: false });
+                                    } else {
+                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
+                                    }
                                 }
                             }
+                            ent = Some(strt);
                         }
                     } else {
-                        res = self.resolve_struct(name, entity, size).unwrap();
+                        ent = Some(self.resolve_struct(name, entity, size).unwrap());
                     };
-                    self.structs.insert(name.into(), res);
+                    if ent.is_some() {
+                    self.structs.insert(name.into(), ent.unwrap());
+                    }
                 }
                 Ok(Type::Struct(name.into()))
             }
@@ -135,23 +141,26 @@ impl TypeResolver {
         if let Some(args) = typ.get_template_argument_types() {
             self.local_types.push_layer();
 
-            let decl = typ.get_declaration().unwrap();
-            let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
-                decl
-            } else {
-                decl.get_template().unwrap()
-            };
+            if let Some(decl) = typ.get_declaration() {
+                let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
+                    Some(decl)
+                } else {
+                    decl.get_template()
+                };
 
-            for (ent, typ) in template
-                .get_children()
-                .iter()
-                .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTypeParameter)
-                .zip(&args)
-            {
-                if let Some(typ) = typ {
-                    let typ = self.resolve_type(*typ)?;
-                    self.local_types
-                        .define(ent.get_name_raw().unwrap().as_str().into(), typ);
+                if let Some(temp) = template {
+                    for (ent, typ) in temp
+                        .get_children()
+                        .iter()
+                        .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTypeParameter)
+                        .zip(&args)
+                    {
+                        if let Some(typ) = typ {
+                            let typ = self.resolve_type(*typ)?;
+                            self.local_types
+                                .define(ent.get_name_raw().unwrap().as_str().into(), typ);
+                        }
+                    }
                 }
             }
         }
@@ -192,7 +201,8 @@ impl TypeResolver {
             }
             clang::TypeKind::DependentSizedArray => {
                 let inner = self.resolve_type(typ.get_element_type().unwrap())?;
-                Type::FixedArray(inner.into(), typ.get_size().unwrap())
+                let size = typ.get_size().unwrap_or(0);
+                Type::FixedArray(inner.into(), size)
             }
             clang::TypeKind::Elaborated => self.resolve_type(typ.get_elaborated_type().unwrap())?,
             clang::TypeKind::Unexposed => {
@@ -291,10 +301,23 @@ impl TypeResolver {
                         is_bitfield: child.is_bit_field(),
                     })
                 }
-                clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
+                clang::EntityKind::Method | clang::EntityKind::Destructor | clang::EntityKind::Constructor if child.is_virtual_method() => {
                     let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
                     let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                     let func_name = self.get_entity_name(child);
+                    let mut full_name = func_name.clone();
+                    let is_constructor = child.get_kind() == clang::EntityKind::Constructor;
+                    let is_destructor = child.get_kind() == clang::EntityKind::Destructor;
+                    if let Some(parent_name) = nice_name.or(Some(name.replace("::", "").into())) {
+                        if is_constructor {
+                            full_name = parent_name.into();
+                        } else if is_destructor {
+                            full_name = format!("__{}", parent_name).into();
+                        } else {
+                            full_name = format!("{}_{}", parent_name, func_name).into();
+                        }
+                        full_name = full_name.replace("RED4ext", "").replace("::", "_").into();
+                    }
                     if is_override || is_final {
                         if let Some(be) = base_entity {
                             let (found, offset) = self.get_func_vft_offset(be, func_name);
@@ -302,6 +325,7 @@ impl TypeResolver {
                                 if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
                                     overridden_virtual_methods.push(Method {
                                         name: func_name,
+                                        full_name,
                                         typ: typ.clone(),
                                         offset
                                     });
@@ -314,6 +338,7 @@ impl TypeResolver {
                         if let Type::Function(typ) = self.resolve_type(child.get_type().unwrap())? {
                             virtual_methods.push(Method {
                                 name: func_name,
+                                full_name,
                                 typ: typ.clone(),
                                 offset
                             });
@@ -366,7 +391,7 @@ impl TypeResolver {
                             vft_base += self.get_vft_base(child);
                         }
                     },
-                    clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
+                    clang::EntityKind::Method | clang::EntityKind::Destructor | clang::EntityKind::Constructor if child.is_virtual_method() => {
                         let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
                         let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                         if !is_override && !is_final {
@@ -400,7 +425,7 @@ impl TypeResolver {
                             }
                         }
                     },
-                    clang::EntityKind::Method | clang::EntityKind::Destructor if child.is_virtual_method() => {
+                    clang::EntityKind::Method | clang::EntityKind::Destructor | clang::EntityKind::Constructor if child.is_virtual_method() => {
                         let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
                         let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                         if !is_override && !is_final {
@@ -478,7 +503,7 @@ impl TypeResolver {
         Ok(FunctionType { return_type, params })
     }
 
-    fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
+    pub fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
         let mut cur = entity;
         let mut full_name = entity
             .get_display_name()

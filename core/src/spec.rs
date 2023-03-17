@@ -13,6 +13,7 @@ use crate::types::FunctionType;
 #[derive(Debug)]
 pub struct FunctionSpec {
     pub name: Ustr,
+    pub full_name: Ustr,
     pub function_type: Rc<FunctionType>,
     pub pattern: Pattern,
     pub offset: Option<i64>,
@@ -21,7 +22,7 @@ pub struct FunctionSpec {
 }
 
 impl FunctionSpec {
-    pub fn new<'a, I>(name: Ustr, function_type: Rc<FunctionType>, comments: I) -> Option<Result<Self>>
+    pub fn new<'a, I>(name: Ustr, full_name: Ustr, function_type: Rc<FunctionType>, comments: I) -> Option<Result<Self>>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -34,7 +35,7 @@ impl FunctionSpec {
         if params.is_empty() {
             None
         } else {
-            let spec = Self::from_params(name, function_type, params)
+            let spec = Self::from_params(name, full_name, function_type, params)
                 .map_err(|err| Error::TypedefParamError(name, err));
             Some(spec)
         }
@@ -42,6 +43,7 @@ impl FunctionSpec {
 
     fn from_params(
         name: Ustr,
+        full_name: Ustr,
         function_type: Rc<FunctionType>,
         mut params: HashMap<&str, &str>,
     ) -> Result<Self, ParamError> {
@@ -63,6 +65,7 @@ impl FunctionSpec {
 
         Ok(Self {
             name,
+            full_name,
             function_type,
             pattern,
             offset,
@@ -118,7 +121,7 @@ mod tests {
             "/// @offset 13",
             "/// @eval fn",
         ];
-        let spec = FunctionSpec::new("test".into(), function_type.into(), comment.into_iter());
+        let spec = FunctionSpec::new("test".into(), "test::test".into(), function_type.into(), comment.into_iter());
 
         assert_matches!(
             spec,
