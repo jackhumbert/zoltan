@@ -1,4 +1,5 @@
 use std::hash::BuildHasherDefault;
+use std::path::Path;
 
 use quickscope::ScopeMap;
 use zoltan::types::*;
@@ -508,6 +509,11 @@ impl TypeResolver {
         let mut full_name = entity
             .get_display_name()
             .unwrap_or_else(|| self.name_allocator.allocate());
+        
+        full_name = match entity.get_kind() {
+            clang::EntityKind::TranslationUnit => Path::new(& full_name).file_stem().unwrap().to_os_string().into_string().unwrap(),
+            _ =>  full_name
+        };
 
         while let Some(parent) = cur.get_semantic_parent() {
             match parent.get_kind() {
