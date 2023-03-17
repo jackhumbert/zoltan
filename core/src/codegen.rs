@@ -13,7 +13,11 @@ const HEADER: &str = "\
 
 pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) -> Result<()> {
     writeln!(output, "{}", HEADER)?;
-    for symbol in symbols {
+    let mut sorted = symbols.to_vec();
+    sorted.sort_by(|a, b| a.name().partial_cmp(b.name()).unwrap());
+    sorted.dedup_by(|a, b| a.name().eq(b.name()));
+    // sorted.sort_by(|a, b| a.rva().partial_cmp(&b.rva()).unwrap());
+    for symbol in sorted {
         // writeln!(
         //     output,
         //     "#define {}_ADDR 0x{:X}",
@@ -22,7 +26,7 @@ pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) -> Re
         // )?;
         writeln!(
             output,
-            "#define {}Addr 0x{:X}",
+            "#define {}_Addr 0x{:X}",
             symbol.name(),
             symbol.rva()
         )?;

@@ -49,7 +49,7 @@ fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result
     Ok(FunctionSymbol::new(spec.name, spec.function_type, res))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionSymbol {
     name: Ustr,
     function_type: Rc<FunctionType>,
