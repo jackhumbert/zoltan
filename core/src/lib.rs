@@ -32,15 +32,17 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     log::info!("Searching for symbols...");
     let (syms, errors) = symbols::resolve_in_exe(specs, &data)?;
     log::info!("Found {} symbol(s)", syms.len());
-
-    if !errors.is_empty() {
+    let error_message = if !errors.is_empty() {
         let message = errors
             .iter()
             .map(|err| err.to_string())
             .collect::<Vec<_>>()
             .join("\n");
         log::warn!("Some of the patterns have failed:\n{message}",);
-    }
+        Some(message)
+    } else {
+        None
+    };
 
     if opts.c_output_path.is_none()
         && opts.rust_output_path.is_none()
@@ -51,7 +53,7 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     }
 
     if let Some(path) = &opts.c_output_path {
-        codegen::write_c_header(File::create(path)?, &syms)?;
+        codegen::write_c_header(File::create(path)?, &syms, error_message)?;
     }
     // if let Some(path) = &opts.r4e_output_path {
     //     codegen::write_r4e_files(path, &syms)?;

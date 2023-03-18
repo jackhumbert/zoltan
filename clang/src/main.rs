@@ -131,7 +131,7 @@ fn run(opts: &Opts) -> Result<()> {
                     let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
                     let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
                     let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit;
-                    if let Some(mut parent_name) = resolver.get_parent_name(parent) {
+                    if let Some(parent_name) = resolver.get_parent_name(parent) {
                         if is_constructor {
                             full_name = parent_name;
                         } else if is_destructor {
