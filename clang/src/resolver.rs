@@ -1,5 +1,5 @@
 use std::hash::BuildHasherDefault;
-use std::path::Path;
+// use std::path::Path;
 
 use quickscope::ScopeMap;
 use zoltan::types::*;
@@ -361,7 +361,7 @@ impl TypeResolver {
         })
     }
 
-    pub fn get_red_name(&mut self, entity : clang::Entity) -> Option<String> {
+    pub fn get_red_name(&mut self, entity : clang::Entity) -> Option<String>{
         let mut red_name: Option<String> = None;
         for child in entity.get_children() {
             match child.get_kind() {
@@ -509,11 +509,12 @@ impl TypeResolver {
         let mut full_name = entity
             .get_display_name()
             .unwrap_or_else(|| self.name_allocator.allocate());
-        
-        full_name = match entity.get_kind() {
-            clang::EntityKind::TranslationUnit => Path::new(& full_name).file_stem().unwrap().to_os_string().into_string().unwrap(),
-            _ =>  full_name
-        };
+
+        // could use filename, but complicates some things        
+        // full_name = match entity.get_kind() {
+        //     clang::EntityKind::TranslationUnit => Path::new(& full_name).file_stem().unwrap().to_os_string().into_string().unwrap(),
+        //     _ =>  full_name
+        // };
 
         while let Some(parent) = cur.get_semantic_parent() {
             match parent.get_kind() {
@@ -543,5 +544,9 @@ impl TypeResolver {
             .get_name_raw()
             .map(|str| str.as_str().into())
             .unwrap_or_else(|| self.name_allocator.allocate().into())
+    }
+    
+    pub fn get_parent_name(&mut self, ent: clang::Entity) -> Option<String> {
+        self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap().replace("RED4ext", "").replace("::", "").into()
     }
 }

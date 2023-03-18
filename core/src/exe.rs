@@ -60,6 +60,10 @@ impl<'a> ExecutableData<'a> {
         self.text
     }
 
+    pub fn rdata(&'a self) -> &'a [u8] {
+        self.rdata
+    }
+
     pub fn text_offset(&'a self) -> u64 {
         self.text_offset
     }
@@ -70,6 +74,21 @@ impl<'a> ExecutableData<'a> {
 
     pub fn text_offset_from_base(&'a self) -> u64 {
         self.text_offset - self.image_base
+    }
+
+    pub fn rdata_offset_from_base(&'a self) -> u64 {
+        self.rdata_offset - self.image_base
+    }
+
+    pub fn rel_offset(&'a self, rva: u64) -> u64 {
+        let offset = if rva > self.rdata_offset_from_base() {
+            rva - self.rdata_offset_from_base()
+        } else if rva > self.text_offset_from_base() {
+            rva - self.text_offset_from_base()
+        } else {
+            rva
+        };
+        offset
     }
 }
 

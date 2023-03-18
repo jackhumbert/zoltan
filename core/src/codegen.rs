@@ -27,7 +27,7 @@ pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) -> Re
         writeln!(
             output,
             "#define {}_Addr 0x{:X}",
-            symbol.name(),
+            symbol.name().replace("~", "_"),
             symbol.rva()
         )?;
     }

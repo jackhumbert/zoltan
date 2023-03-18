@@ -16,7 +16,11 @@ pub fn resolve_in_exe(
 ) -> Result<(Vec<FunctionSymbol>, Vec<SymbolError>)> {
     let mut match_map: HashMap<usize, Vec<u64>> = HashMap::new();
     for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.text()) {
-        match_map.entry(mat.pattern).or_default().push(mat.rva);
+        match_map.entry(mat.pattern).or_default().push(mat.rva + exe.text_offset_from_base());
+    }
+    // also look through RDATA - this will cause issues with duplicate finds (if any exist)
+    for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.rdata()) {
+        match_map.entry(mat.pattern).or_default().push(mat.rva + exe.rdata_offset_from_base());
     }
 
     let mut syms = vec![];
@@ -43,8 +47,8 @@ pub fn resolve_in_exe(
 
 fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result<FunctionSymbol> {
     let res = match &spec.eval {
-        Some(expr) => expr.eval(&EvalContext::new(&spec.pattern, data, rva)?)? - data.image_base(),
-        None => (rva as i64 - spec.offset.unwrap_or(0) as i64) as u64 + data.text_offset_from_base(),
+        Some(expr) => expr.eval(&EvalContext::new(&spec.pattern, data, data.rel_offset(rva))?)? - data.image_base(),
+        None => (rva as i64 - spec.offset.unwrap_or(0) as i64) as u64,
     };
     Ok(FunctionSymbol::new(spec.name, spec.function_type, res))
 }

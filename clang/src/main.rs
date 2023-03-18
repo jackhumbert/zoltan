@@ -49,6 +49,7 @@ fn run(opts: &Opts) -> Result<()> {
     let mut resolver = TypeResolver::new(opts.strip_namespaces);
     let mut entities = vec![];
     let mut functions = vec![];
+    let mut vars = vec![];
 
     unit.get_entity().visit_children(|ent, _| {
         let is_project_file = ent
@@ -64,7 +65,14 @@ fn run(opts: &Opts) -> Result<()> {
                 entities.push(ent);
                 EntityVisitResult::Continue
             }
-            EntityKind::Method | EntityKind::FunctionDecl | EntityKind::Constructor | EntityKind::Destructor => {
+            EntityKind::VarDecl => {
+                vars.push(ent);
+                EntityVisitResult::Continue
+            }
+            EntityKind::Method 
+            | EntityKind::FunctionDecl 
+            | EntityKind::Constructor 
+            | EntityKind::Destructor => {
                 // if let Some(name) = ent.get_name() {
                 //     if name == "GetVehDriveModelDataAI" {
                 //         log::info!("{}", name);
@@ -89,10 +97,24 @@ fn run(opts: &Opts) -> Result<()> {
 
     let mut specs = vec![];
     for ent in entities {
-        if let Some(comment) = ent.get_comment_raw() {
+        if let Some(comment) = ent.get_comment() {
             if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let name = ent.get_name_raw().unwrap().as_str().into();
                 if let Some(spec) = FunctionSpec::new(name, name, typ, comment.as_str().lines()) {
+                    specs.push(spec?);
+                }
+            }
+        }
+    }
+    for ent in vars {
+        if let Some(comment) = ent.get_comment() {
+            if let Type::Long(_typ) = resolver.resolve_type(ent.get_type().unwrap())? {
+                let mut name = ent.get_name_raw().unwrap().as_str().into();
+                let fun_type = zoltan::types::FunctionType::new(vec![], resolver.resolve_type(ent.get_type().unwrap()).unwrap()).into();
+                if let Some(parent) = ent.get_lexical_parent() && let Some(parent_name) = resolver.get_parent_name(parent) {
+                    name = format!("{}_{}", parent_name, name).into();
+                }
+                if let Some(spec) = FunctionSpec::new(name, name, fun_type, comment.as_str().lines()) {
                     specs.push(spec?);
                 }
             }
@@ -108,13 +130,13 @@ fn run(opts: &Opts) -> Result<()> {
                 if let Some(parent) = ent.get_lexical_parent() {
                     let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
                     let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
-                    if let Some(mut parent_name) = resolver.get_red_name(parent).or(Some(resolver.generate_type_name(parent).to_string())) {
-                        parent_name = parent_name.replace("RED4ext", "").replace("::", "").into();
+                    let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit;
+                    if let Some(mut parent_name) = resolver.get_parent_name(parent) {
                         if is_constructor {
                             full_name = parent_name;
                         } else if is_destructor {
                             full_name = format!("__{}", parent_name);
-                        } else {
+                        } else if !is_user_code {
                             name = format!("{}_{}", parent_name, name);
                         }
                     }
