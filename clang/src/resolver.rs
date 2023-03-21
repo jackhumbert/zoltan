@@ -547,6 +547,11 @@ impl TypeResolver {
     }
     
     pub fn get_parent_name(&mut self, ent: clang::Entity) -> Option<String> {
-        self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap().replace("RED4ext", "").replace("::", "").into()
+        let parent_name = self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap().replace("RED4ext", "").replace("::", "");
+        if parent_name.eq("") {
+            None
+        } else {
+            Some(parent_name)
+        }
     }
 }
