@@ -8,7 +8,7 @@ use crate::eval::EvalContext;
 use crate::exe::ExecutableData;
 use crate::patterns;
 use crate::spec::FunctionSpec;
-use crate::types::FunctionType;
+use crate::types::{FunctionType, Type};
 
 pub fn resolve_in_exe(
     specs: Vec<FunctionSpec>,
@@ -50,22 +50,26 @@ fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result
         Some(expr) => expr.eval(&EvalContext::new(&spec.pattern, data, data.rel_offset(rva))?)? - data.image_base(),
         None => (rva as i64 - spec.offset.unwrap_or(0) as i64) as u64,
     };
-    Ok(FunctionSymbol::new(spec.name, spec.function_type, res))
+    Ok(FunctionSymbol::new(spec.name, spec.full_name, spec.spec_type, res, spec.file_name))
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionSymbol {
     name: Ustr,
-    function_type: Rc<FunctionType>,
+    full_name: Ustr,
+    function_type: Type,
     rva: u64,
+    file_name: Option<Ustr>
 }
 
 impl FunctionSymbol {
-    fn new(name: Ustr, function_type: Rc<FunctionType>, rva: u64) -> Self {
+    fn new(name: Ustr, full_name: Ustr, function_type: Type, rva: u64, file_name: Option<Ustr>) -> Self {
         Self {
             name,
+            full_name, 
             function_type,
             rva,
+            file_name
         }
     }
 
@@ -73,7 +77,15 @@ impl FunctionSymbol {
         &self.name
     }
 
-    pub fn function_type(&self) -> Rc<FunctionType> {
+    pub fn full_name(&self) -> &str {
+        &self.full_name
+    }
+
+    pub fn file_name(&self) -> &Option<Ustr> {
+        &self.file_name
+    }
+
+    pub fn function_type(&self) -> Type {
         self.function_type.clone()
     }
 

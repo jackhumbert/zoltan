@@ -48,16 +48,17 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
         && opts.rust_output_path.is_none()
         && opts.dwarf_output_path.is_none()
         && opts.idc_output_path.is_none()
+        && opts.r4e_output_path.is_none()
     {
         log::error!("No output option specified, nothing to do")
     }
 
     if let Some(path) = &opts.c_output_path {
-        codegen::write_c_header(File::create(path)?, &syms, error_message)?;
+        codegen::write_c_header(File::create(path)?, &syms, &error_message)?;
     }
-    // if let Some(path) = &opts.r4e_output_path {
-    //     codegen::write_r4e_files(path, &syms)?;
-    // }
+    if let Some(path) = &opts.r4e_output_path {
+        codegen::write_c_definition(File::create(path)?, &syms, &error_message)?;
+    }
     if let Some(path) = &opts.rust_output_path {
         codegen::write_rust_header(File::create(path)?, &syms)?;
     }

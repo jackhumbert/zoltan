@@ -76,11 +76,13 @@
                 }
             }, 
             "args": [
-                "C:\\Users\\Jack\\Documents\\cyberpunk\\ctd-helper\\src\\red4ext\\Main.cpp",
+                // "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\src\\red4ext\\Signatures.hpp",
+                "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\build\\cmake\\debug\\zoltan\\Signatures.hpp",
                 "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe",
                 "-f=std=c++20",
-                "-f=IC:\\Users\\Jack\\Documents\\cyberpunk\\ctd-helper\\deps\\red4ext.sdk\\include",
-                "--c-output=Addresses.hpp"
+                "-f=IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include",
+                "--r4e-output=C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\src\\red4ext\\Definitions.hpp"
+                // "--c-output=Addresses.hpp"
             ],
             "cwd": "${workspaceFolder}",
             // "console": "internalConsole",

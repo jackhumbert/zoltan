@@ -4,7 +4,8 @@ use error::{Error, Result};
 use flexi_logger::{LogSpecification, Logger};
 use zoltan::opts::Opts;
 use zoltan::spec::FunctionSpec;
-use zoltan::types::Type;
+use zoltan::types::{Type, FunctionEnum};
+use zoltan::ustr::Ustr;
 
 use crate::resolver::TypeResolver;
 
@@ -100,7 +101,16 @@ fn run(opts: &Opts) -> Result<()> {
         if let Some(comment) = ent.get_comment() {
             if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let name = ent.get_name_raw().unwrap().as_str().into();
-                if let Some(spec) = FunctionSpec::new(name, name, typ, comment.as_str().lines()) {
+                let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
+                    if let Some(file) = location.get_file_location().file {
+                        Some(file.get_path().to_str().unwrap().to_string().into())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(spec) = FunctionSpec::new(name, name, Type::Function(typ), comment.as_str().lines(), file_name) {
                     specs.push(spec?);
                 }
             }
@@ -110,11 +120,21 @@ fn run(opts: &Opts) -> Result<()> {
         if let Some(comment) = ent.get_comment() {
             if let Type::Long(_typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let mut name = ent.get_name_raw().unwrap().as_str().into();
-                let fun_type = zoltan::types::FunctionType::new(vec![], resolver.resolve_type(ent.get_type().unwrap()).unwrap()).into();
+                let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();
                 if let Some(parent) = ent.get_lexical_parent() && let Some(parent_name) = resolver.get_parent_name(parent) {
-                    name = format!("{}_{}", parent_name, name).into();
+                    // name = format!("{}_{}", parent_name, name).into();
+                    name = format!("{}::{}", parent_name, name).into();
                 }
-                if let Some(spec) = FunctionSpec::new(name, name, fun_type, comment.as_str().lines()) {
+                let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
+                    if let Some(file) = location.get_file_location().file {
+                        Some(file.get_path().to_str().unwrap().to_string().into())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(spec) = FunctionSpec::new(name, name,var_type, comment.as_str().lines(), file_name) {
                     specs.push(spec?);
                 }
             }
@@ -127,28 +147,59 @@ fn run(opts: &Opts) -> Result<()> {
                 let mut full_name = name.clone();
                 let mut alt_typ = typ.to_owned();
                 let mut params = vec![];
+                // let mut spec_type: Type;
                 if let Some(parent) = ent.get_lexical_parent() {
                     let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
                     let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
                     let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit;
                     if let Some(parent_name) = resolver.get_parent_name(parent) {
-                        if is_constructor {
+                        /*if is_constructor {
                             full_name = parent_name;
                         } else if is_destructor {
                             full_name = format!("__{}", parent_name);
-                        } else if !is_user_code {
-                            name = format!("{}_{}", parent_name, name);
+                        } else*/ if !is_user_code {
+                            // name = format!("{}_{}", parent_name, name);
+                            name = format!("{}::{}", parent_name, name);
                         }
                     }
                     if let Some(parent_type) = parent.get_type() {
                         if let Some(parent_typ) = resolver.resolve_type(parent_type).ok() {
                             params.push(Type::Pointer(parent_typ.into()));
                             params = [params, typ.params.clone()].concat();
-                            alt_typ = zoltan::types::FunctionType::new(params, typ.return_type.clone()).into();
+                            let func_type: FunctionEnum;
+                            if ent.is_virtual_method() {
+                                func_type = FunctionEnum::Virtual;
+                            } else if ent.is_static_method() {
+                                func_type = FunctionEnum::Static;
+                            } else {
+                                func_type = FunctionEnum::Method;
+                            }
+                            alt_typ = zoltan::types::FunctionType::new(params, typ.return_type.clone(), func_type).into();
                         }
                     }
                 }
-                if let Some(spec) = FunctionSpec::new(name.into(), full_name.into(), alt_typ, comment.lines()) {
+                
+                // let mut cur_ent = ent;
+                let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
+                    if let Some(file) = location.get_file_location().file {
+                        Some(file.get_path().to_str().unwrap().to_string().into())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                // let mut file_name: Option<Ustr> = Some(ent.get_file().unwrap().get_path().into_os_string().into_string().unwrap().into());
+                // while let Some(parent) = cur_ent.get_lexical_parent() {
+                //     if parent.get_kind() == clang::EntityKind::TranslationUnit {
+                //         file_name = Some(parent.get_display_name().unwrap().into());
+                //         break
+                //     } else {
+                //         cur_ent = parent;
+                //     }
+                // }
+                // let file_name = ent.get_lexical_parent();
+                if let Some(spec) = FunctionSpec::new(name.into(), full_name.into(), Type::Function(alt_typ), comment.lines(), file_name) {
                     specs.push(spec?);
                 }
             }

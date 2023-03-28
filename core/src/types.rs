@@ -28,9 +28,12 @@ pub enum Type {
     Array(Rc<Type>),
     FixedArray(Rc<Type>, usize),
     Function(Rc<FunctionType>),
+    // VirtualFunction(Rc<FunctionType>),
+    // StaticFunction(Rc<FunctionType>),
     Union(UnionId),
     Struct(StructId),
     Enum(EnumId),
+    Constant(Rc<Type>),
 }
 
 impl Type {
@@ -53,9 +56,12 @@ impl Type {
             Type::Array(_) => None,
             Type::FixedArray(ty, size) => ty.size(info).map(|v| v * size),
             Type::Function(_) => Some(POINTER_SIZE),
+            // Type::VirtualFunction(_) => Some(POINTER_SIZE),
+            // Type::StaticFunction(_) => Some(POINTER_SIZE),
             Type::Union(u) => info.unions.get(u).and_then(|u| u.size),
             Type::Struct(s) => info.structs.get(s).and_then(|s| s.size),
             Type::Enum(e) => info.enums.get(e).and_then(|e| e.size),
+            Type::Constant(ty) => ty.size(info),
         }
     }
 
@@ -69,8 +75,16 @@ impl Type {
             }
             Type::Function(ty) => {
                 let params = ty.params.iter().map(Type::name).format(", ");
-                Some(format!("({params})").into())
+                Some(format!(")({params})").into())
             }
+            // Type::VirtualFunction(ty) => {
+            //     let params = ty.params.iter().map(Type::name).format(", ");
+            //     Some(format!("({params})").into())
+            // }
+            // Type::StaticFunction(ty) => {
+            //     let params = ty.params.iter().map(Type::name).format(", ");
+            //     Some(format!("({params})").into())
+            // }
             _ => None,
         }
     }
@@ -94,7 +108,7 @@ impl Type {
             Type::Struct(id) => id.as_ref().as_str().into(),
             Type::Enum(id) => id.as_ref().as_str().into(),
             Type::Pointer(inner) if matches!(inner.as_ref(), Type::Function(_)) => {
-                format!("{}(*)", inner.name_left()).into()
+                format!("{}(*", inner.name_left()).into()
             }
             Type::Pointer(inner) => format!("{}*", inner.name_left()).into(),
             Type::Reference(inner) if matches!(inner.as_ref(), Type::Function(_)) => {
@@ -104,6 +118,12 @@ impl Type {
             Type::Array(inner) => inner.name_left(),
             Type::FixedArray(inner, _) => inner.name_left(),
             Type::Function(fun) => fun.return_type.name(),
+            Type::Constant(inner) if matches!(inner.as_ref(), Type::Function(_)) => {
+                format!("const {}", inner.name_left()).into()
+            }
+            Type::Constant(inner) => format!("const {}", inner.name_left()).into(),
+            // Type::VirtualFunction(fun) => fun.return_type.name(),
+            // Type::StaticFunction(fun) => fun.return_type.name(),
         }
     }
 
@@ -134,17 +154,26 @@ pub struct EnumId(Ustr);
 pub type TypeMap<K, V> = HashMap<K, V, BuildHasherDefault<IdentityHasher>>;
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum FunctionEnum {
+    Method,
+    Virtual,
+    Static,
+    Typedef,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct FunctionType {
     pub params: Vec<Type>,
     pub return_type: Type,
+    pub func_type: FunctionEnum
 }
 
 impl FunctionType {
-    pub fn new(params: Vec<Type>, return_type: Type) -> Self {
-        Self { params, return_type }
+    pub fn new(params: Vec<Type>, return_type: Type, func_type: FunctionEnum) -> Self {
+        Self { params, return_type, func_type }
     }
-    pub fn new_vft(parent: Type, params: Vec<Type>, return_type: Type) -> Self {
-        Self { params: vec![vec![parent], params].concat(), return_type }
+    pub fn new_vft(parent: Type, params: Vec<Type>, return_type: Type, func_type: FunctionEnum) -> Self {
+        Self { params: vec![vec![parent], params].concat(), return_type, func_type }
     }
 } 
 

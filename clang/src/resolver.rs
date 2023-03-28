@@ -145,6 +145,8 @@ impl TypeResolver {
             if let Some(decl) = typ.get_declaration() {
                 let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
                     Some(decl)
+                // } else if decl.get_kind() == clang::EntityKind::FunctionTemplate {
+                    // Some(decl)
                 } else {
                     decl.get_template()
                 };
@@ -154,6 +156,7 @@ impl TypeResolver {
                         .get_children()
                         .iter()
                         .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTypeParameter)
+                        // .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTemplateParameter)
                         .zip(&args)
                     {
                         if let Some(typ) = typ {
@@ -166,7 +169,7 @@ impl TypeResolver {
             }
         }
 
-        let res = match typ.get_kind() {
+        let mut res = match typ.get_kind() {
             clang::TypeKind::Void => Type::Void,
             clang::TypeKind::Bool => Type::Bool,
             clang::TypeKind::CharS | clang::TypeKind::SChar => Type::Char(true),
@@ -221,6 +224,10 @@ impl TypeResolver {
             }
             other => return Err(Error::UnexpectedType(other)),
         };
+
+        if typ.is_const_qualified() {
+            res = Type::Constant(res.into());
+        }
 
         if typ.get_template_argument_types().is_some() {
             self.local_types.pop_layer();
@@ -282,14 +289,14 @@ impl TypeResolver {
                             },
                             _ => {},
                         }
-                    } else if var_name == "NAME" {
+                    } /*else if var_name == "NAME" {
                         match child.evaluate() {
                             Some(clang::EvaluationResult::String(s)) => {
                                 nice_name = Some(s.to_str().unwrap().into());
                             },
                             _ => {},
                         }
-                    }
+                    }*/
                 }
                 clang::EntityKind::FieldDecl => {
                     let name = self.get_entity_name(child);
@@ -307,17 +314,20 @@ impl TypeResolver {
                     let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                     let func_name = self.get_entity_name(child);
                     let mut full_name = func_name.clone();
+                    // let mut full_name_clean = func_name.clone();
                     let is_constructor = child.get_kind() == clang::EntityKind::Constructor;
                     let is_destructor = child.get_kind() == clang::EntityKind::Destructor;
-                    if let Some(parent_name) = nice_name.or(Some(name.replace("::", "").into())) {
+                    if let Some(parent_name) = nice_name.or(Some(name.into())) {
                         if is_constructor {
                             full_name = parent_name.into();
                         } else if is_destructor {
-                            full_name = format!("__{}", parent_name).into();
+                            full_name = format!("~{}", parent_name).into();
+                            // full_name_clean = format!("__{}", parent_name.replace("::", "")).into();
                         } else {
-                            full_name = format!("{}_{}", parent_name, func_name).into();
+                            full_name = format!("{}::{}", parent_name, func_name).into();
+                            // full_name_clean = format!("{}_{}", parent_name.replace("::", ""), func_name).into();
                         }
-                        full_name = full_name.replace("RED4ext", "").replace("::", "_").into();
+                        // full_name_clean = full_name.replace("RED4ext", "").replace("::", "_").into();
                     }
                     if is_override || is_final {
                         if let Some(be) = base_entity {
@@ -497,11 +507,12 @@ impl TypeResolver {
     fn resolve_function(&mut self, typ: clang::Type) -> Result<FunctionType> {
         let return_type = self.resolve_type(typ.get_result_type().unwrap())?;
         let mut params = vec![];
+        let func_type = FunctionEnum::Typedef;
 
         for typ in typ.get_argument_types().unwrap() {
             params.push(self.resolve_type(typ)?);
         }
-        Ok(FunctionType { return_type, params })
+        Ok(FunctionType { return_type, params, func_type })
     }
 
     pub fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
@@ -530,12 +541,12 @@ impl TypeResolver {
         }
 
         full_name
-            .replace('<', "_")
-            .replace('>', "")
-            .replace(',', "_")
-            .replace('*', "_p")
-            .replace('&', "_r")
-            .replace(' ', "")
+            // .replace('<', "_")
+            // .replace('>', "")
+            // .replace(',', "_")
+            // .replace('*', "_p")
+            // .replace('&', "_r")
+            // .replace(' ', "")
             .into()
     }
 
@@ -547,7 +558,8 @@ impl TypeResolver {
     }
     
     pub fn get_parent_name(&mut self, ent: clang::Entity) -> Option<String> {
-        let parent_name = self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap().replace("RED4ext", "").replace("::", "");
+        // let parent_name = self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap(); //.replace("RED4ext", "").replace("::", "");
+        let parent_name = self.generate_type_name(ent).to_string();
         if parent_name.eq("") {
             None
         } else {

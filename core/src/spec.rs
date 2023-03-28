@@ -8,21 +8,22 @@ use ustr::Ustr;
 use crate::error::{Error, ParamError, Result};
 use crate::eval::Expr;
 use crate::patterns::Pattern;
-use crate::types::FunctionType;
+use crate::types::{FunctionType, Type};
 
 #[derive(Debug)]
 pub struct FunctionSpec {
     pub name: Ustr,
     pub full_name: Ustr,
-    pub function_type: Rc<FunctionType>,
+    pub spec_type: Type,
     pub pattern: Pattern,
     pub offset: Option<i64>,
     pub eval: Option<Expr>,
     pub nth_entry_of: Option<(usize, usize)>,
+    pub file_name: Option<Ustr>
 }
 
 impl FunctionSpec {
-    pub fn new<'a, I>(name: Ustr, full_name: Ustr, function_type: Rc<FunctionType>, comments: I) -> Option<Result<Self>>
+    pub fn new<'a, I>(name: Ustr, full_name: Ustr, spec_type: Type, comments: I, file_name: Option<Ustr>) -> Option<Result<Self>>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -35,7 +36,7 @@ impl FunctionSpec {
         if params.is_empty() {
             None
         } else {
-            let spec = Self::from_params(name, full_name, function_type, params)
+            let spec = Self::from_params(name, full_name, spec_type, params, file_name)
                 .map_err(|err| Error::TypedefParamError(name, err));
             Some(spec)
         }
@@ -44,8 +45,9 @@ impl FunctionSpec {
     fn from_params(
         name: Ustr,
         full_name: Ustr,
-        function_type: Rc<FunctionType>,
+        spec_type: Type,
         mut params: HashMap<&str, &str>,
+        file_name: Option<Ustr>
     ) -> Result<Self, ParamError> {
         let pattern = Pattern::parse(params.remove("pattern").ok_or(ParamError::MissingPattern)?)
             .map_err(|err| ParamError::ParseError("pattern", err))?;
@@ -66,11 +68,12 @@ impl FunctionSpec {
         Ok(Self {
             name,
             full_name,
-            function_type,
+            spec_type,
             pattern,
             offset,
             eval,
             nth_entry_of,
+            file_name
         })
     }
 }
@@ -110,18 +113,18 @@ mod tests {
 
     use super::*;
     use crate::eval::Expr;
-    use crate::types::Type;
+    use crate::types::{Type, FunctionEnum};
 
     #[test]
     fn parse_valid_spec() {
-        let function_type = FunctionType::new(vec![], Type::Void);
+        let spec_type = FunctionType::new(vec![], Type::Void, FunctionEnum::Typedef);
         let comment = [
             "/// @pattern E8 (fn:rel) 45 8B 86 70 01 00 00 33 C9 BA 05 00 00 00 C7 44 24 30 02 00 00 00",
             "/// @nth 5/24",
             "/// @offset 13",
             "/// @eval fn",
         ];
-        let spec = FunctionSpec::new("test".into(), "test::test".into(), function_type.into(), comment.into_iter());
+        let spec = FunctionSpec::new("test".into(), "test::test".into(), spec_type.into(), comment.into_iter());
 
         assert_matches!(
             spec,

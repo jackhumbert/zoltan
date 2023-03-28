@@ -124,6 +124,9 @@ impl<'a> DwarfWriter<'a> {
                 self.define_union(union_ty)
             }
             Type::Function(fun) => self.define_function_type(fun),
+            Type::Constant(inner) => self.define_pointer(inner, gimli::DW_TAG_const_type),
+            // Type::Function(fun) => self.define_function_type(fun),
+            // Type::Function(fun) => self.define_function_type(fun),
         }
     }
 
@@ -391,21 +394,26 @@ impl<'a> DwarfWriter<'a> {
     }
 
     fn define_function_symbol(&mut self, fun: FunctionSymbol, image_base: u64) {
-        let id = self.unit.add(self.unit.root(), gimli::DW_TAG_subprogram);
-        let ret_type_id = self.get_or_define_type(&fun.function_type().return_type);
+        match fun.function_type() {
+            Type::Function(func) => {
+                let id = self.unit.add(self.unit.root(), gimli::DW_TAG_subprogram);
+                let ret_type_id = self.get_or_define_type(&func.return_type);
 
-        let entry = self.unit.get_mut(id);
-        let name = AttributeValue::String(fun.name().as_bytes().to_vec());
-        entry.set(gimli::DW_AT_name, name);
-        let pc = AttributeValue::Address(Address::Constant(image_base + fun.rva()));
-        entry.set(gimli::DW_AT_low_pc, pc);
-        entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(ret_type_id));
+                let entry = self.unit.get_mut(id);
+                let name = AttributeValue::String(fun.name().as_bytes().to_vec());
+                entry.set(gimli::DW_AT_name, name);
+                let pc = AttributeValue::Address(Address::Constant(image_base + fun.rva()));
+                entry.set(gimli::DW_AT_low_pc, pc);
+                entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(ret_type_id));
 
-        for arg in &fun.function_type().params {
-            let type_id = self.get_or_define_type(arg);
-            let arg_id = self.unit.add(id, gimli::DW_TAG_formal_parameter);
-            let param = self.unit.get_mut(arg_id);
-            param.set(gimli::DW_AT_type, AttributeValue::UnitRef(type_id));
+                for arg in &func.params {
+                    let type_id = self.get_or_define_type(arg);
+                    let arg_id = self.unit.add(id, gimli::DW_TAG_formal_parameter);
+                    let param = self.unit.get_mut(arg_id);
+                    param.set(gimli::DW_AT_type, AttributeValue::UnitRef(type_id));
+                }
+            }
+            _ => {}
         }
     }
 }
