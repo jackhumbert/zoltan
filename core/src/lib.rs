@@ -64,8 +64,10 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     }
     if let Some(path) = &opts.idc_output_path {
         let mut file = File::create(path)?;
+        codegen::write_idc_headers(&mut file, type_info)?;
         codegen::write_idc_types(&mut file, type_info)?;
         codegen::write_idc_funs(&mut file, &syms)?;
+        codegen::write_idc_vfuns(&mut file, type_info)?;
     }
 
     if let Some(path) = &opts.dwarf_output_path {

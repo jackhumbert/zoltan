@@ -175,34 +175,26 @@ pub fn write_rust_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) ->
     Ok(())
 }
 
-pub fn write_idc_funs<W: Write>(mut out: W, funs: &[FunctionSymbol]) -> Result<()> {
-    writeln!(out)?;
-    for fun in funs {
-        match fun.function_type() {
-            Type::Function(func) => {
-                writeln!(out, "// START_DECL FUNC {}", fun.rva())?;
-                writeln!(
-                    out,
-                    r"typedef {};",
-                    Type::Function(func).name_with_id(fun.name())
-                )?;
-                writeln!(out, "// END_DECL")?;
-            }
-            _ => {}
-        }
-    }
-
-    Ok(())
+pub fn format_name_for_idc(s: &str) -> String {
+    s
+    .replace("RED4ext::", "")
+    .replace("::", "")
+    .replace('<', "_")
+    .replace('>', "")
+    .replace(',', "_")
+    .replace('*', "_p")
+    .replace('&', "_r")
+    .replace(' ', "")
+    .replace('~', "__")
 }
 
-pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
-    let pad = Pad(2);
+pub fn write_idc_headers<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
     writeln!(out, "{}", HEADER)?;
 
     for (id, struc) in &info.structs {
         writeln!(out)?;
         writeln!(out, "// START_DECL HEADER")?;
-        write!(out, "struct {id} ")?;
+        write!(out, "struct __cppobj {id} ")?;
         // if let Some(base) = struc.base {
         //     write!(out, ": {base} ")?;
         // }
@@ -212,7 +204,7 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         if struc.has_virtual_methods(info) {
             writeln!(out)?;
             writeln!(out, "// START_DECL HEADER")?;
-            write!(out, "struct {id}_vtbl ")?;
+            write!(out, "struct __cppobj {id}_vtbl ")?;
             // if let Some(base) = struc.base {
             //     write!(out, ": {base}_vtbl ")?;
             // }
@@ -227,6 +219,11 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         writeln!(out, "union {id} {{}}")?;
         writeln!(out, "// END_DECL")?;
     }
+    Ok(())
+}
+
+pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
+    let pad = Pad(2);
 
     for (id, ty) in &info.enums {
         writeln!(out)?;
@@ -237,7 +234,7 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         }
         writeln!(out, " {{")?;
         for m in &ty.members {
-            let name = format!("{}_{}", id.to_string().replace("RED4ext", "").replace("::", ""), m.name);
+            let name = format!("{}_{}", format_name_for_idc(id.to_string().as_ref()), m.name);
             writeln!(out, "{pad}{} = {},", name, m.value)?;
         }
         writeln!(out, "}}")?;
@@ -246,17 +243,21 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
 
     for (id, struc) in &info.structs {
         let safe_id;
-        if let Some(nice_name) = struc.nice_name {
-            safe_id = nice_name.to_string();
-        } else {
-            safe_id = id.to_string().replace("RED4ext", "").replace("::", "").replace("~", "__");
-        } 
+        // if let Some(nice_name) = struc.nice_name {
+            // safe_id = nice_name.to_string();
+        // } else {
+            safe_id = id.to_string();
+        // } 
 
-        if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
+        // if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
             writeln!(out)?;
             writeln!(out, "// START_DECL TYPE")?;
+            // should actually handle pack pragmas in the type parsing
+            if safe_id.starts_with("RED4ext::CString") {
+                writeln!(out, "#pragma pack(4)")?;
+            }
             write!(out, "struct ")?;
-            if struc.has_virtual_methods(info) {
+            if struc.base.len() > 0 {
                 write!(out, "__cppobj ")?;
             }
             write!(out, "{id} ")?;
@@ -286,39 +287,40 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             }
             writeln!(out, "}}")?;
             writeln!(out, "// END_DECL")?;
-        }
+        // }
 
         if struc.rva != 0 {
             writeln!(out)?;
             writeln!(out, "// START_DECL VTABLE {}", struc.rva)?;
-            writeln!(out, "{safe_id}")?;
+            writeln!(out, "{}", format_name_for_idc(safe_id.as_ref()))?;
             writeln!(out, "// END_DECL")?;
         }
 
         if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)  {
             writeln!(out)?;
             writeln!(out, "// START_DECL TYPE")?;
-            write!(out, "struct {id}_vtbl ")?;
-            // if struc.base.len() > 0 {
-                // let base = itertools::join(&struc.base, ", ");
-               if let Some(base) = struc.base.first() {
+            write!(out, "struct ")?;
+            if struc.base.len() > 0 {
+                write!(out, "__cppobj ")?;
+            }
+            write!(out, "{safe_id}_vtbl ")?;
+            if let Some(base) = struc.base.first() {
                 write!(out, ": {base}_vtbl")?;
-               }
-            // }
-            writeln!(out, "{{")?;
+            }
+            writeln!(out, " {{")?;
             for m in &struc.virtual_methods {
                 let safe_name = m.name.replace("~", "__");
                 if m.typ.params.is_empty() {
                     writeln!(
                         out,
-                        "{pad}{} (*{})({id} *__hidden this);",
+                        "{pad}{} (*{})({safe_id} *__hidden this);",
                         m.typ.return_type.name(),
                         safe_name,
                     )?;
                 } else {
                     writeln!(
                         out,
-                        "{pad}{} (*{})({id} *__hidden this, {});",
+                        "{pad}{} (*{})({safe_id} *__hidden this, {});",
                         m.typ.return_type.name(),
                         safe_name,
                         m.typ.params.iter().map(Type::name).format(", "),
@@ -328,56 +330,15 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             writeln!(out, "}}")?;
             writeln!(out, "// END_DECL")?;
 
-            if struc.rva != 0 {
-                for m in &struc.overridden_virtual_methods {
-                    let rva = struc.rva + m.offset;
-                    // let rva = m.offset;
-                    writeln!(out)?;
-                    writeln!(out, "// START_DECL VFUNC {rva}")?;
-                    let safe_name = m.full_name.replace("~", "__");
-                    if m.typ.params.is_empty() {
-                        writeln!(
-                            out,
-                            "typedef {} {}({id} *__hidden this);",
-                            m.typ.return_type.name(),
-                            safe_name,
-                        )?;
-                    } else {
-                        writeln!(
-                            out,
-                            "typedef {} {}({id} *__hidden this, {});",
-                            m.typ.return_type.name(),
-                            safe_name,
-                            m.typ.params.iter().map(Type::name).format(", "),
-                        )?;
-                    }
-                    writeln!(out, "// END_DECL")?;
-                }
-                for m in &struc.virtual_methods {
-                    let rva = struc.rva + m.offset;
-                    // let rva = m.offset;
-                    writeln!(out)?;
-                    writeln!(out, "// START_DECL VFUNC {rva}")?;
-                    let safe_name = m.full_name.replace("~", "__");
-                    if m.typ.params.is_empty() {
-                        writeln!(
-                            out,
-                            "typedef {} {}({id} *__hidden this);",
-                            m.typ.return_type.name(),
-                            safe_name,
-                        )?;
-                    } else {
-                        writeln!(
-                            out,
-                            "typedef {} {}({id} *__hidden this, {});",
-                            m.typ.return_type.name(),
-                            safe_name,
-                            m.typ.params.iter().map(Type::name).format(", "),
-                        )?;
-                    }
-                    writeln!(out, "// END_DECL")?;
-                }
-            }
+        }
+    }
+
+    for (id, struc) in &info.structs {
+        if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)  && struc.rva != 0 {
+            writeln!(out)?;
+            writeln!(out, "// START_DECL VSTRUCT {}", struc.rva)?;
+            writeln!(out, "{id}_vtbl")?;
+            writeln!(out, "// END_DECL")?;
         }
     }
 
@@ -392,6 +353,98 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
         writeln!(out, "// END_DECL")?;
     }
 
+    Ok(())
+}
+
+pub fn write_idc_funs<W: Write>(mut out: W, funs: &[FunctionSymbol]) -> Result<()> {
+    writeln!(out)?;
+    for fun in funs {
+        match fun.function_type() {
+            Type::Function(func) => {
+                writeln!(out)?;
+                writeln!(out, "// START_DECL FUNC {}", fun.rva())?;
+                writeln!(
+                    out,
+                    r"typedef {};",
+                    Type::Function(func).name_with_id(format_name_for_idc(fun.name()).as_ref())
+                )?;
+                writeln!(out, "// END_DECL")?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+pub fn write_idc_vfuns<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
+    for (id, struc) in &info.structs {
+        let safe_id = id.to_string();
+        if struc.rva != 0 {
+            let mut serial = false;
+            for base in &struc.base {
+                serial |= base.to_string() == "RED4ext::ISerializable";
+            }
+            if serial {
+                writeln!(out)?;
+                writeln!(out, "// START_DECL VFUNC {}", struc.rva)?;                    
+                writeln!(
+                    out,
+                    "typedef {} {}({safe_id} *__hidden this);",
+                    "RED4ext::CClass*",
+                    format!("{}_GetNativeType", format_name_for_idc(safe_id.as_ref()))
+                )?;
+            }
+            for m in &struc.overridden_virtual_methods {
+                let rva = struc.rva + m.offset;
+                // let rva = m.offset;
+                writeln!(out)?;
+                writeln!(out, "// START_DECL VFUNC {rva}")?;
+                let safe_name = format!("{}_{}", format_name_for_idc(safe_id.as_ref()), format_name_for_idc(m.name.as_ref()));
+                if m.typ.params.is_empty() {
+                    writeln!(
+                        out,
+                        "typedef {} {}({safe_id} *__hidden this);",
+                        m.typ.return_type.name(),
+                        safe_name,
+                    )?;
+                } else {
+                    writeln!(
+                        out,
+                        "typedef {} {}({safe_id} *__hidden this, {});",
+                        m.typ.return_type.name(),
+                        safe_name,
+                        m.typ.params.iter().map(Type::name).format(", "),
+                    )?;
+                }
+                writeln!(out, "// END_DECL")?;
+            }
+            for m in &struc.virtual_methods {
+                let rva = struc.rva + m.offset;
+                // let rva = m.offset;
+                writeln!(out)?;
+                writeln!(out, "// START_DECL VFUNC {rva}")?;
+                let safe_name = format!("{}_{}", format_name_for_idc(safe_id.as_ref()), format_name_for_idc(m.name.as_ref()));
+                if m.typ.params.is_empty() {
+                    writeln!(
+                        out,
+                        "typedef {} {}({safe_id} *__hidden this);",
+                        m.typ.return_type.name(),
+                        safe_name,
+                    )?;
+                } else {
+                    writeln!(
+                        out,
+                        "typedef {} {}({safe_id} *__hidden this, {});",
+                        m.typ.return_type.name(),
+                        safe_name,
+                        m.typ.params.iter().map(Type::name).format(", "),
+                    )?;
+                }
+                writeln!(out, "// END_DECL")?;
+            }
+        }
+    }
     Ok(())
 }
 

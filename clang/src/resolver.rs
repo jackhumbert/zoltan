@@ -64,6 +64,18 @@ impl TypeResolver {
                                     }
                                 }
                             }
+                            if name.to_string().starts_with("RED4ext::WeakHandle") {
+                                if let Some(typ) = self.get_template_type(entity) {
+                                    strt.base.clear();
+                                    strt.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
+                                    if let Some(ref_cnt_typ) = self.local_types.get(&Ustr::from("RED4ext::RefCnt")) {
+                                        let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
+                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(ref_cnt_rc), bit_offset: Some(8), is_bitfield: false });
+                                    } else {
+                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
+                                    }
+                                }
+                            }
                             ent = Some(strt);
                         }
                     } else {
@@ -127,7 +139,7 @@ impl TypeResolver {
                 if let Some(typ) = typ {
                     let typ = self.resolve_type(*typ).unwrap();
                     self.local_types
-                        .define(ent.get_name_raw().unwrap().as_str().into(), typ.clone());
+                        .define(ent.get_display_name().unwrap().as_str().into(), typ.clone());
                     p_type = Some(typ);
                     break;
                 }
@@ -162,7 +174,7 @@ impl TypeResolver {
                         if let Some(typ) = typ {
                             let typ = self.resolve_type(*typ)?;
                             self.local_types
-                                .define(ent.get_name_raw().unwrap().as_str().into(), typ);
+                                .define(ent.get_display_name().unwrap().as_str().into(), typ);
                         }
                     }
                 }
@@ -282,7 +294,7 @@ impl TypeResolver {
                 }
                 clang::EntityKind::VarDecl => {
                     let var_name = self.get_entity_name(child);
-                    if var_name == "VFT_RVA" {
+                    if var_name == "VFT" {
                         match child.evaluate() {
                             Some(clang::EvaluationResult::UnsignedInteger(u)) => {
                                 rva = u;

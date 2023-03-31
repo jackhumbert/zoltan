@@ -31,7 +31,7 @@ pub fn resolve_in_exe(
             Some(addrs) => {
                 if let Some((n, max)) = fun.nth_entry_of {
                     match addrs.get(n) {
-                        Some(rva) if max == addrs.len() => syms.push(resolve_symbol(fun, exe, *rva)?),
+                        Some(rva) if max == addrs.len() || max == 0 => syms.push(resolve_symbol(fun, exe, *rva)?),
                         Some(_) => errs.push(SymbolError::CountMismatch(fun.name, addrs.len())),
                         None => errs.push(SymbolError::NotEnoughMatches(fun.name, addrs.len())),
                     }

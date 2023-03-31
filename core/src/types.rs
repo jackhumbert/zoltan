@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt};
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::rc::Rc;
@@ -65,17 +65,21 @@ impl Type {
         }
     }
 
-    fn name_right(&self) -> Option<Cow<'static, str>> {
+    fn name_right(&self, parent: Option<Type>) -> Option<Cow<'static, str>> {
         match self {
-            Type::Pointer(inner) => inner.name_right(),
-            Type::Reference(inner) => inner.name_right(),
-            Type::Array(inner) => Some(format!("{}[]", inner.name_right().unwrap_or_default()).into()),
+            Type::Pointer(inner) => inner.name_right(Some(self.to_owned())),
+            Type::Reference(inner) => inner.name_right(Some(self.to_owned())),
+            Type::Array(inner) => Some(format!("{}[]", inner.name_right(Some(self.to_owned())).unwrap_or_default()).into()),
             Type::FixedArray(inner, size) => {
-                Some(format!("{}[{size}]", inner.name_right().unwrap_or_default()).into())
+                Some(format!("{}[{size}]", inner.name_right(Some(self.to_owned())).unwrap_or_default()).into())
             }
             Type::Function(ty) => {
                 let params = ty.params.iter().map(Type::name).format(", ");
-                Some(format!(")({params})").into())
+                match parent {
+                    Some(Type::Pointer(_)) | Some(Type::Reference(_)) => Some(format!(")({params})").into()),
+                    _ => Some(format!("({params})").into())
+                }
+                
             }
             // Type::VirtualFunction(ty) => {
             //     let params = ty.params.iter().map(Type::name).format(", ");
@@ -104,15 +108,15 @@ impl Type {
             Type::Long(false) => "uint64_t".into(),
             Type::Float => "float".into(),
             Type::Double => "double".into(),
-            Type::Union(id) => id.as_ref().as_str().into(),
-            Type::Struct(id) => id.as_ref().as_str().into(),
-            Type::Enum(id) => id.as_ref().as_str().into(),
+            Type::Union(id) => id.to_string().into(),
+            Type::Struct(id) => id.to_string().into(),
+            Type::Enum(id) => id.to_string().into(),
             Type::Pointer(inner) if matches!(inner.as_ref(), Type::Function(_)) => {
                 format!("{}(*", inner.name_left()).into()
             }
             Type::Pointer(inner) => format!("{}*", inner.name_left()).into(),
             Type::Reference(inner) if matches!(inner.as_ref(), Type::Function(_)) => {
-                format!("{}(&)", inner.name_left()).into()
+                format!("{}(&", inner.name_left()).into()
             }
             Type::Reference(inner) => format!("{}&", inner.name_left()).into(),
             Type::Array(inner) => inner.name_left(),
@@ -128,28 +132,70 @@ impl Type {
     }
 
     pub fn name(&self) -> Cow<'static, str> {
-        match self.name_right() {
+        match self.name_right(None) {
             Some(right) => format!("{}{right}", self.name_left()).into(),
             None => self.name_left(),
         }
     }
 
     pub fn name_with_id(&self, id: &str) -> Cow<'static, str> {
-        match self.name_right() {
+        match self.name_right(None) {
             Some(right) => format!("{} {id}{right}", self.name_left()).into(),
             None => format!("{} {id}", self.name_left()).into(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Display, Hash)]
+pub fn format_name_for_idc(s: Ustr) -> Ustr {
+    s
+    .replace('<', "_")
+    .replace('>', "")
+    .replace(',', "_")
+    .replace('*', "_p")
+    .replace('&', "_r")
+    .replace(' ', "")
+    .replace('~', "__").into()
+}
+
+trait IdcFormat : std::fmt::Display {
+    fn to_idc_string(s: &str) -> String {
+        format!("{}", s
+        .replace('<', "_")
+        .replace('>', "")
+        .replace(',', "_")
+        .replace('*', "_p")
+        .replace('&', "_r")
+        .replace(' ', "")
+        .replace('~', "__"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
 pub struct StructId(Ustr);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Display, Hash)]
+impl fmt::Display for StructId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", format_name_for_idc(self.0))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
 pub struct UnionId(Ustr);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Display, Hash)]
+impl fmt::Display for UnionId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", format_name_for_idc(self.0))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
 pub struct EnumId(Ustr);
+
+impl fmt::Display for EnumId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", format_name_for_idc(self.0))
+    }
+}
 
 pub type TypeMap<K, V> = HashMap<K, V, BuildHasherDefault<IdentityHasher>>;
 

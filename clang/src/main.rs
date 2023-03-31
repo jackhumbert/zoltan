@@ -74,11 +74,6 @@ fn run(opts: &Opts) -> Result<()> {
             | EntityKind::FunctionDecl 
             | EntityKind::Constructor 
             | EntityKind::Destructor => {
-                // if let Some(name) = ent.get_name() {
-                //     if name == "GetVehDriveModelDataAI" {
-                //         log::info!("{}", name);
-                //     }
-                // }
                 functions.push(ent);
                 EntityVisitResult::Continue
             },
