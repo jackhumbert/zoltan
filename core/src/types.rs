@@ -175,7 +175,8 @@ pub struct StructId(Ustr);
 
 impl fmt::Display for StructId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format_name_for_idc(self.0))
+        // write!(f, "{}", format_name_for_idc(self.0))
+        write!(f, "{}", self.0)
     }
 }
 

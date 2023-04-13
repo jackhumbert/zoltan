@@ -37,7 +37,9 @@ impl TypeResolver {
     }
 
     pub fn resolve_decl(&mut self, entity: clang::Entity) -> Result<Type> {
-        let name: Ustr = self.generate_type_name(entity);
+        // let name: Ustr = entity.get_name().unwrap().into();
+        // let context = self.generate_context_name(entity);
+        let name = self.generate_context_name(entity);
 
         match entity.get_kind() {
             clang::EntityKind::StructDecl
@@ -63,8 +65,7 @@ impl TypeResolver {
                                         strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
                                     }
                                 }
-                            }
-                            if name.to_string().starts_with("RED4ext::WeakHandle") {
+                            } else if name.to_string().starts_with("RED4ext::WeakHandle") {
                                 if let Some(typ) = self.get_template_type(entity) {
                                     strt.base.clear();
                                     strt.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
@@ -75,6 +76,8 @@ impl TypeResolver {
                                         strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
                                     }
                                 }
+                            } else {
+                                
                             }
                             ent = Some(strt);
                         }
@@ -82,7 +85,7 @@ impl TypeResolver {
                         ent = Some(self.resolve_struct(name, entity, size).unwrap());
                     };
                     if ent.is_some() {
-                    self.structs.insert(name.into(), ent.unwrap());
+                        self.structs.insert(name.into(), ent.unwrap());
                     }
                 }
                 Ok(Type::Struct(name.into()))
@@ -329,7 +332,8 @@ impl TypeResolver {
                     // let mut full_name_clean = func_name.clone();
                     let is_constructor = child.get_kind() == clang::EntityKind::Constructor;
                     let is_destructor = child.get_kind() == clang::EntityKind::Destructor;
-                    if let Some(parent_name) = nice_name.or(Some(name.into())) {
+                    // let is_parent_file = entity.get_kind() == clang::EntityKind::TranslationUnit;
+                    if let Some(parent_name) = (self.get_parent_name(entity)) {
                         if is_constructor {
                             full_name = parent_name.into();
                         } else if is_destructor {
@@ -528,10 +532,43 @@ impl TypeResolver {
     }
 
     pub fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
-        let mut cur = entity;
+        let mut cur = Some(entity);
         let mut full_name = entity
             .get_display_name()
             .unwrap_or_else(|| self.name_allocator.allocate());
+
+        // could use filename, but complicates some things        
+        // full_name = match entity.get_kind() {
+            // clang::EntityKind::TranslationUnit => "".into(),
+            // _ =>  full_name
+        // };
+
+        while let Some(parent) = cur {
+            match parent.get_kind() {
+                // clang::EntityKind::TranslationUnit => {}
+                clang::EntityKind::Namespace if self.strip_namespaces => {}
+                _ => {
+                    let parent_name = parent.get_display_name();
+                    let prefix = parent_name.as_deref().unwrap_or("__unnamed");
+                    full_name = format!("{}::{}", prefix, full_name);
+                }
+            }
+            cur = parent.get_lexical_parent();
+        }
+
+        full_name
+            // .replace('<', "_")
+            // .replace('>', "")
+            // .replace(',', "_")
+            // .replace('*', "_p")
+            // .replace('&', "_r")
+            // .replace(' ', "")
+            .into()
+    }
+
+    pub fn generate_context_name(&mut self, entity: clang::Entity) -> Ustr {
+        let mut cur = Some(entity);
+        let mut names: Vec<String> = vec![];
 
         // could use filename, but complicates some things        
         // full_name = match entity.get_kind() {
@@ -539,20 +576,21 @@ impl TypeResolver {
         //     _ =>  full_name
         // };
 
-        while let Some(parent) = cur.get_semantic_parent() {
+        while let Some(parent) = cur {
             match parent.get_kind() {
-                clang::EntityKind::TranslationUnit => {}
+                // clang::EntityKind::TranslationUnit => {}
                 clang::EntityKind::Namespace if self.strip_namespaces => {}
                 _ => {
-                    let parent_name = parent.get_name();
-                    let prefix = parent_name.as_deref().unwrap_or("__unnamed");
-                    full_name = format!("{}::{}", prefix, full_name);
+                    let parent_name = parent.get_display_name().unwrap_or(self.get_entity_name(parent).to_string());
+                    if !parent_name.contains("/") && !parent_name.contains("\\") {
+                        names.insert(0, parent_name.into());
+                    }
                 }
             }
-            cur = parent;
+            cur = parent.get_lexical_parent();
         }
 
-        full_name
+        names.join("::")
             // .replace('<', "_")
             // .replace('>', "")
             // .replace(',', "_")
@@ -571,7 +609,7 @@ impl TypeResolver {
     
     pub fn get_parent_name(&mut self, ent: clang::Entity) -> Option<String> {
         // let parent_name = self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap(); //.replace("RED4ext", "").replace("::", "");
-        let parent_name = self.generate_type_name(ent).to_string();
+        let parent_name = self.generate_context_name(ent).to_string();
         if parent_name.eq("") {
             None
         } else {

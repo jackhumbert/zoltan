@@ -19,7 +19,8 @@ pub struct FunctionSpec {
     pub offset: Option<i64>,
     pub eval: Option<Expr>,
     pub nth_entry_of: Option<(usize, usize)>,
-    pub file_name: Option<Ustr>
+    pub file_name: Option<Ustr>,
+    pub needs_impl: bool
 }
 
 impl FunctionSpec {
@@ -60,6 +61,7 @@ impl FunctionSpec {
             .map(Expr::parse)
             .transpose()
             .map_err(|err| ParamError::ParseError("eval", err))?;
+        let needs_impl = params.remove("noimpl").is_none();
         let nth_entry_of = params.remove("nth").map(parse_index_specifier).transpose()?;
         if let Some(str) = params.keys().next() {
             return Err(ParamError::UnknownParam(str.deref().to_owned()));
@@ -73,7 +75,8 @@ impl FunctionSpec {
             offset,
             eval,
             nth_entry_of,
-            file_name
+            file_name,
+            needs_impl
         })
     }
 }

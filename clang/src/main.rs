@@ -114,11 +114,11 @@ fn run(opts: &Opts) -> Result<()> {
     for ent in vars {
         if let Some(comment) = ent.get_comment() {
             if let Type::Long(_typ) = resolver.resolve_type(ent.get_type().unwrap())? {
-                let mut name = ent.get_name_raw().unwrap().as_str().into();
+                let name: Ustr = ent.get_name_raw().unwrap().as_str().into();
+                let mut full_name = name.clone();
                 let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();
                 if let Some(parent) = ent.get_lexical_parent() && let Some(parent_name) = resolver.get_parent_name(parent) {
-                    // name = format!("{}_{}", parent_name, name).into();
-                    name = format!("{}::{}", parent_name, name).into();
+                    full_name = format!("{}::{}", parent_name, name).into();
                 }
                 let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
                     if let Some(file) = location.get_file_location().file {
@@ -129,7 +129,7 @@ fn run(opts: &Opts) -> Result<()> {
                 } else {
                     None
                 };
-                if let Some(spec) = FunctionSpec::new(name, name,var_type, comment.as_str().lines(), file_name) {
+                if let Some(spec) = FunctionSpec::new(name, full_name, var_type, comment.as_str().lines(), file_name) {
                     specs.push(spec?);
                 }
             }
@@ -144,18 +144,18 @@ fn run(opts: &Opts) -> Result<()> {
                 let mut params = vec![];
                 // let mut spec_type: Type;
                 if let Some(parent) = ent.get_lexical_parent() {
-                    let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
-                    let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
-                    let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit;
+                    // let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
+                    // let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
+                    // let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit || ent.get_kind() == clang::EntityKind::TranslationUnit;
                     if let Some(parent_name) = resolver.get_parent_name(parent) {
                         /*if is_constructor {
                             full_name = parent_name;
                         } else if is_destructor {
                             full_name = format!("__{}", parent_name);
-                        } else*/ if !is_user_code {
+                        } else if !is_user_code { */
                             // name = format!("{}_{}", parent_name, name);
-                            name = format!("{}::{}", parent_name, name);
-                        }
+                            full_name = format!("{}::{}", parent_name, name);
+                        // }
                     }
                     if let Some(parent_type) = parent.get_type() {
                         if let Some(parent_typ) = resolver.resolve_type(parent_type).ok() {
