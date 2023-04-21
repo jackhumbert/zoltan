@@ -28,7 +28,7 @@ pub enum Error {
     OtherError(#[from] Box<dyn std::error::Error>),
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum SymbolError {
     #[error("too many matches for {0} ({1})")]
     MoreThanOneMatch(Ustr, usize),
@@ -38,6 +38,35 @@ pub enum SymbolError {
     NotEnoughMatches(Ustr, usize),
     #[error("count mismatch for {0} ({1})")]
     CountMismatch(Ustr, usize),
+}
+
+impl SymbolError {
+    fn eq(&self, other: &SymbolError) -> bool {
+        let name = match self {
+            Self::MoreThanOneMatch(name, _) => name,
+            Self::NoMatches(name) => name,
+            Self::NotEnoughMatches(name, _) => name,
+            Self::CountMismatch(name, _) => name,
+            _ => "" 
+        };
+        let other_name = match other {
+            Self::MoreThanOneMatch(name, _) => name,
+            Self::NoMatches(name) => name,
+            Self::NotEnoughMatches(name, _) => name,
+            Self::CountMismatch(name, _) => name,
+            _ => "" 
+        };
+        name == other_name
+    }
+    pub fn full_name(&self) -> Ustr {
+        match self {
+            Self::MoreThanOneMatch(name, _) => *name,
+            Self::NoMatches(name) => *name,
+            Self::NotEnoughMatches(name, _) => *name,
+            Self::CountMismatch(name, _) => *name,
+            _ => "".into() 
+        }
+    }
 }
 
 #[derive(Debug, Error)]

@@ -177,7 +177,7 @@ impl TypeResolver {
                         if let Some(typ) = typ {
                             let typ = self.resolve_type(*typ)?;
                             self.local_types
-                                .define(ent.get_display_name().unwrap().as_str().into(), typ);
+                                .define(ent.get_name_raw().unwrap().as_str().into(), typ);
                         }
                     }
                 }

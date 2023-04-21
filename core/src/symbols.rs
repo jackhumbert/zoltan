@@ -13,7 +13,7 @@ use crate::types::{FunctionType, Type};
 pub fn resolve_in_exe(
     specs: Vec<FunctionSpec>,
     exe: &ExecutableData,
-) -> Result<(Vec<FunctionSymbol>, Vec<SymbolError>)> {
+) -> Result<(Vec<FunctionSymbol>, Vec<SymbolError>, Vec<FunctionSymbol>)> {
     let mut match_map: HashMap<usize, Vec<u64>> = HashMap::new();
     for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.text()) {
         match_map.entry(mat.pattern).or_default().push(mat.rva + exe.text_offset_from_base());
@@ -24,6 +24,7 @@ pub fn resolve_in_exe(
     }
 
     let mut syms = vec![];
+    let mut notf = vec![];
     let mut errs = vec![];
     for (i, fun) in specs.into_iter().enumerate() {
         match match_map.get(&i).map(|vec| &vec[..]) {
@@ -32,17 +33,27 @@ pub fn resolve_in_exe(
                 if let Some((n, max)) = fun.nth_entry_of {
                     match addrs.get(n) {
                         Some(rva) if max == addrs.len() || max == 0 => syms.push(resolve_symbol(fun, exe, *rva)?),
-                        Some(_) => errs.push(SymbolError::CountMismatch(fun.name, addrs.len())),
-                        None => errs.push(SymbolError::NotEnoughMatches(fun.name, addrs.len())),
+                        Some(_) => {
+                            errs.push(SymbolError::CountMismatch(fun.full_name, addrs.len()));
+                            notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type, 0, fun.file_name, fun.needs_impl));
+                        },
+                        None => {
+                            errs.push(SymbolError::NotEnoughMatches(fun.full_name, addrs.len()));
+                            notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type, 0, fun.file_name, fun.needs_impl));
+                        },
                     }
                 } else {
-                    errs.push(SymbolError::MoreThanOneMatch(fun.name, addrs.len()));
+                    errs.push(SymbolError::MoreThanOneMatch(fun.full_name, addrs.len()));
+                    notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type, 0, fun.file_name, fun.needs_impl));
                 }
             }
-            None => errs.push(SymbolError::NoMatches(fun.name)),
+            None => { 
+                errs.push(SymbolError::NoMatches(fun.full_name));
+                notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type, 0, fun.file_name, fun.needs_impl));
+            },
         }
     }
-    Ok((syms, errs))
+    Ok((syms, errs, notf))
 }
 
 fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result<FunctionSymbol> {
@@ -53,7 +64,7 @@ fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result
     Ok(FunctionSymbol::new(spec.name, spec.full_name, spec.spec_type, res, spec.file_name, spec.needs_impl))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionSymbol {
     name: Ustr,
     full_name: Ustr,
@@ -73,6 +84,10 @@ impl FunctionSymbol {
             file_name,
             needs_impl
         }
+    }
+
+    fn eq(&self, other: &FunctionSymbol) -> bool {
+        self.full_name == other.full_name
     }
 
     pub fn func_name(&self) -> &str {
@@ -95,15 +110,19 @@ impl FunctionSymbol {
         v.join("::")
     }
 
-    pub fn full_name(&self) -> String {
-        let mut v: Vec<&str> = self.full_name.split("::").collect();
-        for (i, s) in v.clone().into_iter().enumerate() {
-            if s.contains("/") || s.contains("\\") {
-                v.remove(i);
-            }
-        }
-        v.join("::")
+    pub fn full_name(&self) -> &str {
+        &self.full_name
     }
+
+    // pub fn full_name(&self) -> String {
+    //     let mut v: Vec<&str> = self.full_name.split("::").collect();
+    //     for (i, s) in v.clone().into_iter().enumerate() {
+    //         if s.contains("/") || s.contains("\\") {
+    //             v.remove(i);
+    //         }
+    //     }
+    //     v.join("::")
+    // }
 
     pub fn file_name(&self) -> &Option<Ustr> {
         &self.file_name

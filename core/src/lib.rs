@@ -30,7 +30,7 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     let data = ExecutableData::new(&exe)?;
 
     log::info!("Searching for symbols...");
-    let (syms, errors) = symbols::resolve_in_exe(specs, &data)?;
+    let (syms, errors, notf) = symbols::resolve_in_exe(specs, &data)?;
     log::info!("Found {} symbol(s)", syms.len());
     let error_message = if !errors.is_empty() {
         let message = errors
@@ -54,10 +54,10 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     }
 
     if let Some(path) = &opts.c_output_path {
-        codegen::write_c_header(File::create(path)?, &syms, &error_message)?;
+        codegen::write_c_header(File::create(path)?, &syms, &errors, false)?;
     }
     if let Some(path) = &opts.r4e_output_path {
-        codegen::write_c_definition(File::create(path)?, &syms, &error_message)?;
+        codegen::write_c_definition(File::create(path)?, &syms, &errors)?;
     }
     if let Some(path) = &opts.rust_output_path {
         codegen::write_rust_header(File::create(path)?, &syms)?;

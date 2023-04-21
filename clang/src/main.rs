@@ -113,25 +113,30 @@ fn run(opts: &Opts) -> Result<()> {
     }
     for ent in vars {
         if let Some(comment) = ent.get_comment() {
-            if let Type::Long(_typ) = resolver.resolve_type(ent.get_type().unwrap())? {
-                let name: Ustr = ent.get_name_raw().unwrap().as_str().into();
-                let mut full_name = name.clone();
-                let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();
-                if let Some(parent) = ent.get_lexical_parent() && let Some(parent_name) = resolver.get_parent_name(parent) {
-                    full_name = format!("{}::{}", parent_name, name).into();
-                }
-                let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
-                    if let Some(file) = location.get_file_location().file {
-                        Some(file.get_path().to_str().unwrap().to_string().into())
+            match resolver.resolve_type(ent.get_type().unwrap())? {
+                Type::Constant(_) | Type::Long(_) => {
+                    let name: Ustr = ent.get_name_raw().unwrap().as_str().into();
+                    let mut full_name = name.clone();
+                    let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();
+                    if let Some(parent) = ent.get_lexical_parent() {
+                        if let Some(parent_name) = resolver.get_parent_name(parent) {
+                            full_name = format!("{}::{}", parent_name, name).into();
+                        }
+                    }
+                    let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
+                        if let Some(file) = location.get_file_location().file {
+                            Some(file.get_path().to_str().unwrap().to_string().into())
+                        } else {
+                            None
+                        }
                     } else {
                         None
+                    };
+                    if let Some(spec) = FunctionSpec::new(name, full_name, var_type, comment.as_str().lines(), file_name) {
+                        specs.push(spec?);
                     }
-                } else {
-                    None
-                };
-                if let Some(spec) = FunctionSpec::new(name, full_name, var_type, comment.as_str().lines(), file_name) {
-                    specs.push(spec?);
-                }
+                },
+                _ => {}
             }
         }
     }
