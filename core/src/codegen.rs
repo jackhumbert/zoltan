@@ -46,7 +46,7 @@ pub fn format_name_for_addr(s: &str) -> String {
     let mut v: Vec<&str> = s.split("::").collect();
     let name = v[v.len()-1].replace("~", "_");
     v.remove(v.len()-1);
-    if v[0].eq("RED4ext") {
+    if v.len() > 0 && v[0].eq("RED4ext") {
         v.remove(0);
     }
     let context = v.join("");
@@ -73,31 +73,36 @@ pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol], error
                 if safe {
                     writeln!(
                         output,
-                        "#ifndef {}_Addr\n#define {}_Addr 0x{:X}\n#endif",
-                        addr_name,
-                        addr_name,
+                        "#ifndef {addr_name}_Addr\n#define {addr_name}_Addr 0x{:X}\n#endif",
                         symbol.rva()
                     )?;
                 } else {
                     writeln!(
                         output,
-                        "#define {}_Addr 0x{:X}",
-                        addr_name,
+                        "#define {addr_name}_Addr 0x{:X}",
                         symbol.rva()
                     )?;
                 }
             },
             SymbolEntry::NotFound(error) => {
                 let addr_name = format_name_for_addr(error.full_name().into());
-                writeln!(
-                    output,
-                    "#define {}_Addr 0 {}",
-                    addr_name,
-                    format!(r#"_Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {}_Addr is 0 - Zoltan found {}\")")"#,
-                        addr_name,
-                        error.to_string()
-                    )
-                )?;
+                if safe {
+                    writeln!(
+                        output,
+                        "#ifndef {addr_name}_Addr\n{0: <119}\\\n{1: <119}\\\n{2}\n#endif",
+                        format!("#define {addr_name}_Addr"),
+                        format!(r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#),
+                        format!(r#"              "is 0 - Zoltan found {}\")")"#, error.to_string())
+                    )?;
+                } else {
+                    writeln!(
+                        output,
+                        "{0: <119}\\\n{1: <119}\\\n{2}",
+                        format!("#define {addr_name}_Addr"),
+                        format!(r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#),
+                        format!(r#"              "is 0 - Zoltan found {}\")")"#, error.to_string())
+                    )?;
+                }
             }
         }
     }

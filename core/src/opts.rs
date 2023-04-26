@@ -12,6 +12,7 @@ pub struct Opts {
     pub strip_namespaces: bool,
     pub eager_type_export: bool,
     pub compiler_flags: Vec<String>,
+    pub safe_addr: bool
 }
 
 impl Opts {
@@ -58,6 +59,9 @@ impl Opts {
             .argument("FLAGS")
             .map(|flag| format!("-{}", flag))
             .many();
+        let safe_addr = long("safe-addr")
+            .help("Wrap defines in conditionals")
+            .switch();
 
         let parser = construct!(Opts {
             source_path,
@@ -70,6 +74,7 @@ impl Opts {
             strip_namespaces,
             eager_type_export
             compiler_flags,
+            safe_addr
         });
 
         Info::default().descr(header).for_parser(parser).run()
