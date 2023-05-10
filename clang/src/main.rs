@@ -142,6 +142,7 @@ fn run(opts: &Opts) -> Result<()> {
     }
     for ent in functions {
         if let Some(comment) = ent.get_comment() {
+            // println!("{}", comment.as_str());
             if let Type::Function(typ) = resolver.resolve_type(ent.get_type().unwrap())? {
                 let mut name = ent.get_name_raw().unwrap().as_str().to_owned();
                 let mut full_name = name.clone();
@@ -149,8 +150,8 @@ fn run(opts: &Opts) -> Result<()> {
                 let mut params = vec![];
                 // let mut spec_type: Type;
                 if let Some(parent) = ent.get_lexical_parent() {
-                    // let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
-                    // let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
+                    let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
+                    let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
                     // let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit || ent.get_kind() == clang::EntityKind::TranslationUnit;
                     if let Some(parent_name) = resolver.get_parent_name(parent) {
                         /*if is_constructor {
@@ -171,6 +172,10 @@ fn run(opts: &Opts) -> Result<()> {
                                 func_type = FunctionEnum::Virtual;
                             } else if ent.is_static_method() {
                                 func_type = FunctionEnum::Static;
+                            } else if is_constructor {
+                                func_type = FunctionEnum::Constructor;
+                            } else if is_destructor {
+                                func_type = FunctionEnum::Destructor;
                             } else {
                                 func_type = FunctionEnum::Method;
                             }

@@ -22,8 +22,14 @@ pub enum SymbolEntry {
 impl SymbolEntry {
     pub fn full_name(&self) -> &str {
         match self {
-            Self::Found(func) => func.full_name(),
+            Self::Found(func) => func.addr_name(),
             Self::NotFound(err) => err.full_name().into()
+        }
+    }
+    pub fn rva(&self) -> u64 {
+        match self {
+            Self::Found(func) => func.rva(),
+            Self::NotFound(_) => 0
         }
     }
 }
@@ -57,19 +63,37 @@ pub fn format_name_for_addr(s: &str) -> String {
     }
 }
 
-pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol], errors: &[SymbolError], safe: bool) -> Result<()> {
+pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol], errors: &[SymbolError], safe: bool) -> Result<Vec<SymbolEntry>, Box<dyn std::error::Error>> {
     writeln!(output, "{}", HEADER)?;
     let mut all_symbols: Vec<SymbolEntry> = vec![];
-    symbols.into_iter().for_each(|f| all_symbols.push(SymbolEntry::Found(f.to_owned())));
+    symbols.into_iter().for_each(|f| {
+        let mut n = f.to_owned().clone();
+        n.set_addr_name(format_name_for_addr(f.full_name()).into());
+        all_symbols.push(SymbolEntry::Found(n.to_owned()))
+    });
     errors.into_iter().for_each(|f| all_symbols.push(SymbolEntry::NotFound(f.to_owned())));
 
     all_symbols.sort_by(|a, b| a.full_name().partial_cmp(b.full_name()).unwrap());
-    all_symbols.dedup_by(|a, b| a.full_name().eq(b.full_name()));
+    all_symbols.dedup_by(|a, b| a.full_name().eq(b.full_name()) && a.rva() == b.rva());
+    let (dedup, dups) = all_symbols.partition_dedup_by(|a, b| a.full_name().eq(b.full_name()));
     // sorted.sort_by(|a, b| a.rva().partial_cmp(&b.rva()).unwrap());
-    for entry in all_symbols {
+    let mut names_changed: Vec<SymbolEntry> = vec![];
+    dups.iter().for_each(|f| {
+        match f { 
+            SymbolEntry::Found(symbol) => {
+                names_changed.push(SymbolEntry::Found(symbol.dedup().to_owned()));
+            }
+            SymbolEntry::NotFound(_) =>  names_changed.push(f.to_owned())
+        }
+    });
+    let mut dedupped_symbols: Vec<SymbolEntry> = dedup.iter().chain(names_changed.iter()).map(|e| e.to_owned()).collect();
+    dedupped_symbols.sort_by(|a, b| a.full_name().partial_cmp(b.full_name()).unwrap());
+    for entry in &dedupped_symbols {
         match entry {
             SymbolEntry::Found(symbol) => {
-                let addr_name = format_name_for_addr(symbol.full_name());
+                // let addr_name = format_name_for_addr(symbol.full_name());
+                // symbol.set_addr_name(addr_name.into());
+                let addr_name = symbol.addr_name();
                 if safe {
                     writeln!(
                         output,
@@ -107,18 +131,25 @@ pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol], error
         }
     }
 
-    Ok(())
+    Ok(dedupped_symbols)
 }
 
-pub fn write_c_definition<W: Write>(mut output: W, symbols: &[FunctionSymbol], errors: &[SymbolError]) -> Result<()> {
+pub fn write_c_definition<W: Write>(mut output: W, symbols: &[FunctionSymbol], errors: &[SymbolError], safe: bool) -> Result<()> {
     writeln!(output, "#pragma once")?;
-    write_c_header(output.by_ref(), symbols, errors, true)?;
+    let header_objects = write_c_header(output.by_ref(), symbols, errors, safe)?;
     writeln!(output, "\n#include <RED4ext/RED4ext.hpp>")?;
     writeln!(output, "#include <RED4ext/Relocation.hpp>")?;
+    let mut sorted: Vec<FunctionSymbol> = vec![];
+    header_objects.iter().for_each(|f|
+        match f {
+            SymbolEntry::Found(entry) => sorted.push(entry.to_owned()),
+            _ => {}
+        }
+    );
     // writeln!(output, "#ifdef RED4EXT_STATIC_LIB")?;
-    let mut sorted = symbols.to_vec();
-    sorted.sort_by(|a, b| a.name().partial_cmp(b.name()).unwrap());
-    sorted.dedup_by(|a, b| a.name().eq(b.name()));
+    // let mut sorted = symbols.to_vec();
+    // sorted.sort_by(|a, b| a.name().partial_cmp(b.name()).unwrap());
+    // sorted.dedup_by(|a, b| a.name().eq(b.name()) && a.rva() == b.rva());
     // sorted.sort_by(|a, b| a.rva().partial_cmp(&b.rva()).unwrap());
     // let map: HashMap<Ustr, &FunctionSymbol> = sorted.iter().filter(|s| s.file_name().is_some()).map(|s| (s.file_name().unwrap(), s)).into_iter().collect();
     let map = sorted.iter().filter(|s| s.file_name().is_some()).group_by(|s| s.file_name().unwrap());
@@ -138,13 +169,14 @@ pub fn write_c_definition<W: Write>(mut output: W, symbols: &[FunctionSymbol], e
         }
         match symbol.function_type() {
             Type::Function(func) => {
-                let addr_name = format_name_for_addr(symbol.full_name());
                 let args;
+                let headerTypes;
                 let header;
                 match func.func_type {
-                    FunctionEnum::Virtual => continue,
+                    FunctionEnum::Virtual | FunctionEnum::Constructor | FunctionEnum::Destructor => continue,
                     FunctionEnum::Method => {
                         header = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name_with_id(format!("a{}", i).as_str())).join(", ");
+                        headerTypes = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name()).join(", ");
                         args = func.params.iter().enumerate().map(|(i, _f)| {
                         if i == 0 { 
                             "this".into()
@@ -154,21 +186,27 @@ pub fn write_c_definition<W: Write>(mut output: W, symbols: &[FunctionSymbol], e
                     },
                     FunctionEnum::Typedef => {
                         header = func.params.iter().enumerate().map(|(i, f)| f.name_with_id(format!("a{}", i).as_str())).join(", ");
+                        headerTypes = func.params.iter().enumerate().map(|(i, f)| f.name()).join(", ");
                         args = func.params.iter().enumerate().map(|(i, _f)| format!("a{}", i)).join(", ");
                     },
                     FunctionEnum::Static => {
                         header = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name_with_id(format!("a{}", i).as_str())).join(", ");
+                        headerTypes = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name()).join(", ");
                         args = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, _f)| format!("a{}", i)).join(", ");
                     },
                 }
+                // let func_type = format!("decltype(&{})", symbol.full_name());
+                let func_type = format!("{} (*)({})", func.return_type.name(), headerTypes);
+                let using = format!("using {}_t = {};", symbol.addr_name(), func_type);
                 writeln!(
                     output,
-                    "inline {} {}({}) {{\n    RED4ext::RelocFunc<decltype(&{})> call({}_Addr);\n    return call({});\n}}\n",
+                    "inline {} {}({}) {{\n    {}\n    RED4ext::RelocFunc<{}_t> call({}_Addr);\n    return call({});\n}}\n",
                     func.return_type.name(),
                     symbol.full_name(),
                     header,
-                    symbol.full_name(),
-                    addr_name,
+                    using,
+                    symbol.addr_name(),
+                    symbol.addr_name(),
                     args
                 )?;
             }

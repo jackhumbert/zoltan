@@ -63,8 +63,9 @@ impl FunctionSpec {
             .map_err(|err| ParamError::ParseError("eval", err))?;
         let needs_impl = params.remove("noimpl").is_none();
         let nth_entry_of = params.remove("nth").map(parse_index_specifier).transpose()?;
-        if let Some(str) = params.keys().next() {
-            return Err(ParamError::UnknownParam(str.deref().to_owned()));
+        for key in params.keys() {
+            log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
+            // return Err(ParamError::UnknownParam(str.deref().to_owned()));
         }
 
         Ok(Self {
@@ -84,7 +85,8 @@ impl FunctionSpec {
 fn parse_typedef_comment(line: &str) -> Option<(&str, &str)> {
     let (key, val) = line
         .trim_start()
-        .strip_prefix("///")?
+        .strip_prefix("///")
+        .or_else(|| line.trim_start().strip_prefix("*"))?
         .trim_start()
         .strip_prefix('@')?
         .split_once(' ')?;

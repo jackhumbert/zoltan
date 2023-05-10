@@ -1,6 +1,7 @@
 #![feature(slice_group_by)]
 #![feature(assert_matches)]
 #![feature(iter_advance_by)]
+#![feature(slice_partition_dedup)]
 
 pub mod codegen;
 pub mod dwarf;
@@ -57,7 +58,7 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
         codegen::write_c_header(File::create(path)?, &syms, &errors, opts.safe_addr)?;
     }
     if let Some(path) = &opts.r4e_output_path {
-        codegen::write_c_definition(File::create(path)?, &syms, &errors)?;
+        codegen::write_c_definition(File::create(path)?, &syms, &errors, opts.safe_addr)?;
     }
     if let Some(path) = &opts.rust_output_path {
         codegen::write_rust_header(File::create(path)?, &syms)?;

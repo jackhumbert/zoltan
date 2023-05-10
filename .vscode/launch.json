@@ -77,13 +77,15 @@
             }, 
             "args": [
                 // "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\src\\red4ext\\Signatures.hpp",
-                "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\build\\zoltan\\Signatures.hpp",
+                // "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\build\\zoltan\\Signatures.hpp",
+                "D:\\Code\\RED4ext\\deps\\red4ext.sdk\\include\\RED4ext\\Process.hpp",
                 "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe",
                 "-f=std=c++20",
-                "-f=IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include",
+                // "-f=IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include",
+                "-f=ID:\\Code\\RED4ext\\deps\\red4ext.sdk\\include",
                 // "--eager-type-export",
                 "--r4e-output=Definitions.hpp",
-                "--safe-addr"
+                // "--safe-addr"
                 // "--idc-output=C:\\Users\\Jack\\Documents\\cyberpunk\\IDA_Cyberpunk_2077\\types.c",
                 // "--r4e-output=C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\src\\red4ext\\Definitions.hpp"
                 // "--c-output=Addresses.hpp"

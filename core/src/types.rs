@@ -206,6 +206,8 @@ pub enum FunctionEnum {
     Virtual,
     Static,
     Typedef,
+    Constructor,
+    Destructor
 }
 
 #[derive(Debug, PartialEq, Clone)]

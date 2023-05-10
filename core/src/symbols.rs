@@ -71,7 +71,8 @@ pub struct FunctionSymbol {
     function_type: Type,
     rva: u64,
     file_name: Option<Ustr>,
-    needs_impl: bool
+    needs_impl: bool,
+    addr_name: Ustr
 }
 
 impl FunctionSymbol {
@@ -82,7 +83,8 @@ impl FunctionSymbol {
             function_type,
             rva,
             file_name,
-            needs_impl
+            needs_impl,
+            addr_name: "".into()
         }
     }
 
@@ -99,6 +101,12 @@ impl FunctionSymbol {
         &self.name
     }
 
+    pub fn dedup(&self) -> Self {
+        let mut n = self.clone();
+        n.addr_name = format!("{}_0", self.addr_name).into();
+        n
+    }
+
     pub fn context(&self) -> String {
         let mut v: Vec<&str> = self.full_name.split("::").collect();
         v.remove(v.len()-1);
@@ -112,6 +120,14 @@ impl FunctionSymbol {
 
     pub fn full_name(&self) -> &str {
         &self.full_name
+    }
+
+    pub fn addr_name(&self) -> &str {
+        &self.addr_name
+    }
+
+    pub fn set_addr_name(&mut self, addr_name: Ustr) {
+        self.addr_name = addr_name;
     }
 
     // pub fn full_name(&self) -> String {
