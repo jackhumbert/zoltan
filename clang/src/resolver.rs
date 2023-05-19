@@ -1,6 +1,6 @@
 use std::hash::BuildHasherDefault;
-// use std::path::Path;
 
+// use std::path::Path;
 use quickscope::ScopeMap;
 use zoltan::types::*;
 use zoltan::ustr::{IdentityHasher, Ustr};
@@ -57,27 +57,60 @@ impl TypeResolver {
                             if name.to_string().starts_with("RED4ext::Handle") {
                                 if let Some(typ) = self.get_template_type(entity) {
                                     strt.base.clear();
-                                    strt.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
-                                    if let Some(ref_cnt_typ) = self.local_types.get(&Ustr::from("RED4ext::RefCnt")) {
+                                    strt.members.push(DataMember {
+                                        name: "instance".into(),
+                                        typ: Type::Pointer(typ.into()),
+                                        bit_offset: Some(0),
+                                        is_bitfield: false,
+                                    });
+                                    if let Some(ref_cnt_typ) =
+                                        self.local_types.get(&Ustr::from("RED4ext::RefCnt"))
+                                    {
                                         let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
-                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(ref_cnt_rc), bit_offset: Some(8), is_bitfield: false });
+                                        strt.members.push(DataMember {
+                                            name: "refCount".into(),
+                                            typ: Type::Pointer(ref_cnt_rc),
+                                            bit_offset: Some(8),
+                                            is_bitfield: false,
+                                        });
                                     } else {
-                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
+                                        strt.members.push(DataMember {
+                                            name: "refCount".into(),
+                                            typ: Type::Pointer(Type::Void.into()),
+                                            bit_offset: Some(8),
+                                            is_bitfield: false,
+                                        });
                                     }
                                 }
                             } else if name.to_string().starts_with("RED4ext::WeakHandle") {
                                 if let Some(typ) = self.get_template_type(entity) {
                                     strt.base.clear();
-                                    strt.members.push(DataMember { name: "instance".into(), typ: Type::Pointer(typ.into()), bit_offset: Some(0), is_bitfield: false });
-                                    if let Some(ref_cnt_typ) = self.local_types.get(&Ustr::from("RED4ext::RefCnt")) {
+                                    strt.members.push(DataMember {
+                                        name: "instance".into(),
+                                        typ: Type::Pointer(typ.into()),
+                                        bit_offset: Some(0),
+                                        is_bitfield: false,
+                                    });
+                                    if let Some(ref_cnt_typ) =
+                                        self.local_types.get(&Ustr::from("RED4ext::RefCnt"))
+                                    {
                                         let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
-                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(ref_cnt_rc), bit_offset: Some(8), is_bitfield: false });
+                                        strt.members.push(DataMember {
+                                            name: "refCount".into(),
+                                            typ: Type::Pointer(ref_cnt_rc),
+                                            bit_offset: Some(8),
+                                            is_bitfield: false,
+                                        });
                                     } else {
-                                        strt.members.push(DataMember { name: "refCount".into(), typ: Type::Pointer(Type::Void.into()), bit_offset: Some(8), is_bitfield: false }); 
+                                        strt.members.push(DataMember {
+                                            name: "refCount".into(),
+                                            typ: Type::Pointer(Type::Void.into()),
+                                            bit_offset: Some(8),
+                                            is_bitfield: false,
+                                        });
                                     }
                                 }
                             } else {
-                                
                             }
                             ent = Some(strt);
                         }
@@ -112,43 +145,43 @@ impl TypeResolver {
     pub fn get_template_type(&mut self, entity: clang::Entity) -> Option<Type> {
         let mut p_type: Option<Type> = None;
         if let Some(e_typ) = entity.get_type() {
-        if let Some(args) = e_typ.get_template_argument_types() {
-            // log::info!("get_template_arguments");
-            // match args.first() {
-            //     Some(clang::TemplateArgument::Type(typ)) => {
-            //         log::info!("first && Type");
-            //         p_type = self.resolve_type(*typ).ok();
-            //     },
-            //     Some(_) => {
-            //         log::info!("first && other");
-            //     },
-            //     None => {}
-            // }
-            // self.local_types.push_layer();
+            if let Some(args) = e_typ.get_template_argument_types() {
+                // log::info!("get_template_arguments");
+                // match args.first() {
+                //     Some(clang::TemplateArgument::Type(typ)) => {
+                //         log::info!("first && Type");
+                //         p_type = self.resolve_type(*typ).ok();
+                //     },
+                //     Some(_) => {
+                //         log::info!("first && other");
+                //     },
+                //     None => {}
+                // }
+                // self.local_types.push_layer();
 
-            let decl = e_typ.get_declaration().unwrap();
-            let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
-                decl
-            } else {
-                decl.get_template().unwrap()
-            };
+                let decl = e_typ.get_declaration().unwrap();
+                let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
+                    decl
+                } else {
+                    decl.get_template().unwrap()
+                };
 
-            for (ent, typ) in template
-                .get_children()
-                .iter()
-                .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTypeParameter)
-                .zip(&args)
-            {
-                if let Some(typ) = typ {
-                    let typ = self.resolve_type(*typ).unwrap();
-                    self.local_types
-                        .define(ent.get_display_name().unwrap().as_str().into(), typ.clone());
-                    p_type = Some(typ);
-                    break;
+                for (ent, typ) in template
+                    .get_children()
+                    .iter()
+                    .take_while(|ent| ent.get_kind() == clang::EntityKind::TemplateTypeParameter)
+                    .zip(&args)
+                {
+                    if let Some(typ) = typ {
+                        let typ = self.resolve_type(*typ).unwrap();
+                        self.local_types
+                            .define(ent.get_display_name().unwrap().as_str().into(), typ.clone());
+                        p_type = Some(typ);
+                        break;
+                    }
                 }
             }
         }
-    }
         return p_type;
     }
 
@@ -161,7 +194,7 @@ impl TypeResolver {
                 let template = if decl.get_kind() == clang::EntityKind::ClassTemplate {
                     Some(decl)
                 // } else if decl.get_kind() == clang::EntityKind::FunctionTemplate {
-                    // Some(decl)
+                // Some(decl)
                 } else {
                     decl.get_template()
                 };
@@ -284,10 +317,12 @@ impl TypeResolver {
         for child in children {
             match child.get_kind() {
                 clang::EntityKind::BaseSpecifier => {
-                    if let Some(base_o) = child.get_definition()
-                    .map(|ent| self.resolve_decl(ent))
-                    .transpose()?
-                    .and_then(|ty| ty.into_struct().ok()) {
+                    if let Some(base_o) = child
+                        .get_definition()
+                        .map(|ent| self.resolve_decl(ent))
+                        .transpose()?
+                        .and_then(|ty| ty.into_struct().ok())
+                    {
                         base.push(base_o);
                     }
                     if vft_base == 0 {
@@ -301,17 +336,17 @@ impl TypeResolver {
                         match child.evaluate() {
                             Some(clang::EvaluationResult::UnsignedInteger(u)) => {
                                 rva = u;
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                     } /*else if var_name == "NAME" {
-                        match child.evaluate() {
-                            Some(clang::EvaluationResult::String(s)) => {
-                                nice_name = Some(s.to_str().unwrap().into());
-                            },
-                            _ => {},
-                        }
-                    }*/
+                          match child.evaluate() {
+                              Some(clang::EvaluationResult::String(s)) => {
+                                  nice_name = Some(s.to_str().unwrap().into());
+                              },
+                              _ => {},
+                          }
+                      }*/
                 }
                 clang::EntityKind::FieldDecl => {
                     let name = self.get_entity_name(child);
@@ -324,9 +359,19 @@ impl TypeResolver {
                         is_bitfield: child.is_bit_field(),
                     })
                 }
-                clang::EntityKind::Method | clang::EntityKind::Destructor | clang::EntityKind::Constructor if child.is_virtual_method() => {
-                    let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
-                    let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
+                clang::EntityKind::Method
+                | clang::EntityKind::Destructor
+                | clang::EntityKind::Constructor
+                    if child.is_virtual_method() =>
+                {
+                    let is_override = child
+                        .get_children()
+                        .iter()
+                        .any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
+                    let is_final = child
+                        .get_children()
+                        .iter()
+                        .any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                     let func_name = self.get_entity_name(child);
                     let mut full_name = func_name.clone();
                     // let mut full_name_clean = func_name.clone();
@@ -354,7 +399,7 @@ impl TypeResolver {
                                         name: func_name,
                                         full_name,
                                         typ: typ.clone(),
-                                        offset
+                                        offset,
                                     });
                                 }
                             }
@@ -367,7 +412,7 @@ impl TypeResolver {
                                 name: func_name,
                                 full_name,
                                 typ: typ.clone(),
-                                offset
+                                offset,
                             });
                         }
                     }
@@ -387,7 +432,7 @@ impl TypeResolver {
         })
     }
 
-    pub fn get_red_name(&mut self, entity : clang::Entity) -> Option<String>{
+    pub fn get_red_name(&mut self, entity: clang::Entity) -> Option<String> {
         let mut red_name: Option<String> = None;
         for child in entity.get_children() {
             match child.get_kind() {
@@ -397,18 +442,18 @@ impl TypeResolver {
                         match child.evaluate() {
                             Some(clang::EvaluationResult::String(s)) => {
                                 red_name = Some(s.to_str().unwrap().into());
-                            },
-                            _ => {},
+                            }
+                            _ => {}
                         }
                     }
-                },
+                }
                 _ => {}
             }
         }
         red_name
     }
 
-    fn get_vft_base(&mut self, entity : clang::Entity) -> u64 {
+    fn get_vft_base(&mut self, entity: clang::Entity) -> u64 {
         if let Some(def) = entity.get_definition() {
             let mut vft_base = 0;
             for child in def.get_children() {
@@ -417,10 +462,20 @@ impl TypeResolver {
                         if vft_base == 0 {
                             vft_base += self.get_vft_base(child);
                         }
-                    },
-                    clang::EntityKind::Method | clang::EntityKind::Destructor | clang::EntityKind::Constructor if child.is_virtual_method() => {
-                        let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
-                        let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
+                    }
+                    clang::EntityKind::Method
+                    | clang::EntityKind::Destructor
+                    | clang::EntityKind::Constructor
+                        if child.is_virtual_method() =>
+                    {
+                        let is_override = child
+                            .get_children()
+                            .iter()
+                            .any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
+                        let is_final = child
+                            .get_children()
+                            .iter()
+                            .any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                         if !is_override && !is_final {
                             vft_base += 8;
                         }
@@ -434,7 +489,7 @@ impl TypeResolver {
         }
     }
 
-    fn get_func_vft_offset(&mut self, entity : clang::Entity, name: Ustr) -> (bool, u64) {
+    fn get_func_vft_offset(&mut self, entity: clang::Entity, name: Ustr) -> (bool, u64) {
         if let Some(def) = entity.get_definition() {
             let mut found = false;
             let mut vft_offset = 0;
@@ -451,10 +506,20 @@ impl TypeResolver {
                                 vft_offset += offset
                             }
                         }
-                    },
-                    clang::EntityKind::Method | clang::EntityKind::Destructor | clang::EntityKind::Constructor if child.is_virtual_method() => {
-                        let is_override = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
-                        let is_final = child.get_children().iter().any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
+                    }
+                    clang::EntityKind::Method
+                    | clang::EntityKind::Destructor
+                    | clang::EntityKind::Constructor
+                        if child.is_virtual_method() =>
+                    {
+                        let is_override = child
+                            .get_children()
+                            .iter()
+                            .any(|c| c.get_kind() == clang::EntityKind::OverrideAttr);
+                        let is_final = child
+                            .get_children()
+                            .iter()
+                            .any(|c| c.get_kind() == clang::EntityKind::FinalAttr);
                         if !is_override && !is_final {
                             let child_name = self.get_entity_name(child);
                             if child_name == name {
@@ -528,7 +593,11 @@ impl TypeResolver {
         for typ in typ.get_argument_types().unwrap() {
             params.push(self.resolve_type(typ)?);
         }
-        Ok(FunctionType { return_type, params, func_type })
+        Ok(FunctionType {
+            return_type,
+            params,
+            func_type,
+        })
     }
 
     pub fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
@@ -537,10 +606,10 @@ impl TypeResolver {
             .get_display_name()
             .unwrap_or_else(|| self.name_allocator.allocate());
 
-        // could use filename, but complicates some things        
+        // could use filename, but complicates some things
         // full_name = match entity.get_kind() {
-            // clang::EntityKind::TranslationUnit => "".into(),
-            // _ =>  full_name
+        // clang::EntityKind::TranslationUnit => "".into(),
+        // _ =>  full_name
         // };
 
         while let Some(parent) = cur {
@@ -570,7 +639,7 @@ impl TypeResolver {
         let mut cur = Some(entity);
         let mut names: Vec<String> = vec![];
 
-        // could use filename, but complicates some things        
+        // could use filename, but complicates some things
         // full_name = match entity.get_kind() {
         //     clang::EntityKind::TranslationUnit => Path::new(& full_name).file_stem().unwrap().to_os_string().into_string().unwrap(),
         //     _ =>  full_name
@@ -581,7 +650,9 @@ impl TypeResolver {
                 // clang::EntityKind::TranslationUnit => {}
                 clang::EntityKind::Namespace if self.strip_namespaces => {}
                 _ => {
-                    let parent_name = parent.get_display_name().unwrap_or(self.get_entity_name(parent).to_string());
+                    let parent_name = parent
+                        .get_display_name()
+                        .unwrap_or(self.get_entity_name(parent).to_string());
                     if !parent_name.contains("/") && !parent_name.contains("\\") {
                         names.insert(0, parent_name.into());
                     }
@@ -590,7 +661,8 @@ impl TypeResolver {
             cur = parent.get_lexical_parent();
         }
 
-        names.join("::")
+        names
+            .join("::")
             // .replace('<', "_")
             // .replace('>', "")
             // .replace(',', "_")
@@ -606,7 +678,7 @@ impl TypeResolver {
             .map(|str| str.as_str().into())
             .unwrap_or_else(|| self.name_allocator.allocate().into())
     }
-    
+
     pub fn get_parent_name(&mut self, ent: clang::Entity) -> Option<String> {
         // let parent_name = self.get_red_name(ent).or(Some(self.generate_type_name(ent).to_string())).unwrap(); //.replace("RED4ext", "").replace("::", "");
         let parent_name = self.generate_context_name(ent).to_string();

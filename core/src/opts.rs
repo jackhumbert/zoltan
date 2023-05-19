@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct Opts {
-    pub source_path: PathBuf,
+    pub source_path: Vec<PathBuf>,
     pub exe_path: PathBuf,
     pub dwarf_output_path: Option<PathBuf>,
     pub c_output_path: Option<PathBuf>,
@@ -12,15 +12,16 @@ pub struct Opts {
     pub strip_namespaces: bool,
     pub eager_type_export: bool,
     pub compiler_flags: Vec<String>,
-    pub safe_addr: bool
+    pub show_clang_errors: bool,
+    pub safe_addr: bool,
 }
 
 impl Opts {
     pub fn load(header: &'static str) -> Self {
         use bpaf::*;
 
-        let source_path = positional_os("SOURCE").map(PathBuf::from);
-        let exe_path = positional_os("EXE").map(PathBuf::from);
+        let source_path = positional_os("SOURCE").map(PathBuf::from).many();
+        let exe_path = long("exe").short('x').argument_os("EXE").map(PathBuf::from);
         let dwarf_output_path = long("dwarf-output")
             .short('o')
             .help("DWARF file to write")
@@ -57,11 +58,12 @@ impl Opts {
             .short('f')
             .help("Flags to pass to the compiler")
             .argument("FLAGS")
-            .map(|flag| format!("-{}", flag))
             .many();
-        let safe_addr = long("safe-addr")
-            .help("Wrap defines in conditionals")
+        let show_clang_errors = long("show-clang-errors")
+            .short('s')
+            .help("Show all of the clang compiler messages")
             .switch();
+        let safe_addr = long("safe-addr").help("Wrap defines in conditionals").switch();
 
         let parser = construct!(Opts {
             source_path,
@@ -74,6 +76,7 @@ impl Opts {
             strip_namespaces,
             eager_type_export
             compiler_flags,
+            show_clang_errors,
             safe_addr
         });
 

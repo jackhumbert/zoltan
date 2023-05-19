@@ -1,5 +1,6 @@
-use std::{borrow::Cow, fmt};
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::rc::Rc;
 
@@ -69,17 +70,28 @@ impl Type {
         match self {
             Type::Pointer(inner) => inner.name_right(Some(self.to_owned())),
             Type::Reference(inner) => inner.name_right(Some(self.to_owned())),
-            Type::Array(inner) => Some(format!("{}[]", inner.name_right(Some(self.to_owned())).unwrap_or_default()).into()),
-            Type::FixedArray(inner, size) => {
-                Some(format!("{}[{size}]", inner.name_right(Some(self.to_owned())).unwrap_or_default()).into())
-            }
+            Type::Array(inner) => Some(
+                format!(
+                    "{}[]",
+                    inner.name_right(Some(self.to_owned())).unwrap_or_default()
+                )
+                .into(),
+            ),
+            Type::FixedArray(inner, size) => Some(
+                format!(
+                    "{}[{size}]",
+                    inner.name_right(Some(self.to_owned())).unwrap_or_default()
+                )
+                .into(),
+            ),
             Type::Function(ty) => {
                 let params = ty.params.iter().map(Type::name).format(", ");
                 match parent {
-                    Some(Type::Pointer(_)) | Some(Type::Reference(_)) => Some(format!(")({params})").into()),
-                    _ => Some(format!("({params})").into())
+                    Some(Type::Pointer(_)) | Some(Type::Reference(_)) => {
+                        Some(format!(")({params})").into())
+                    }
+                    _ => Some(format!("({params})").into()),
                 }
-                
             }
             // Type::VirtualFunction(ty) => {
             //     let params = ty.params.iter().map(Type::name).format(", ");
@@ -147,26 +159,28 @@ impl Type {
 }
 
 pub fn format_name_for_idc(s: Ustr) -> Ustr {
-    s
-    .replace('<', "_")
-    .replace('>', "")
-    .replace(',', "_")
-    .replace('*', "_p")
-    .replace('&', "_r")
-    .replace(' ', "")
-    .replace('~', "__").into()
-}
-
-trait IdcFormat : std::fmt::Display {
-    fn to_idc_string(s: &str) -> String {
-        format!("{}", s
-        .replace('<', "_")
+    s.replace('<', "_")
         .replace('>', "")
         .replace(',', "_")
         .replace('*', "_p")
         .replace('&', "_r")
         .replace(' ', "")
-        .replace('~', "__"))
+        .replace('~', "__")
+        .into()
+}
+
+trait IdcFormat: std::fmt::Display {
+    fn to_idc_string(s: &str) -> String {
+        format!(
+            "{}",
+            s.replace('<', "_")
+                .replace('>', "")
+                .replace(',', "_")
+                .replace('*', "_p")
+                .replace('&', "_r")
+                .replace(' ', "")
+                .replace('~', "__")
+        )
     }
 }
 
@@ -207,24 +221,32 @@ pub enum FunctionEnum {
     Static,
     Typedef,
     Constructor,
-    Destructor
+    Destructor,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FunctionType {
     pub params: Vec<Type>,
     pub return_type: Type,
-    pub func_type: FunctionEnum
+    pub func_type: FunctionEnum,
 }
 
 impl FunctionType {
     pub fn new(params: Vec<Type>, return_type: Type, func_type: FunctionEnum) -> Self {
-        Self { params, return_type, func_type }
+        Self {
+            params,
+            return_type,
+            func_type,
+        }
     }
     pub fn new_vft(parent: Type, params: Vec<Type>, return_type: Type, func_type: FunctionEnum) -> Self {
-        Self { params: vec![vec![parent], params].concat(), return_type, func_type }
+        Self {
+            params: vec![vec![parent], params].concat(),
+            return_type,
+            func_type,
+        }
     }
-} 
+}
 
 #[derive(Debug)]
 pub struct DataMember {
@@ -312,7 +334,7 @@ pub struct Method {
     pub name: Ustr,
     pub full_name: Ustr,
     pub typ: Rc<FunctionType>,
-    pub offset: u64
+    pub offset: u64,
 }
 
 #[derive(Debug)]

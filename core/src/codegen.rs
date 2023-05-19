@@ -4,32 +4,54 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use ustr::Ustr;
-use enum_as_inner::EnumAsInner;
 
 use crate::error::{Result, SymbolError};
 use crate::symbols::FunctionSymbol;
-use crate::types::{Type, TypeInfo, FunctionEnum};
+use crate::types::{FunctionEnum, Type, TypeInfo};
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionError {
+    error: SymbolError,
+    addr_name: Ustr,
+}
+
+impl FunctionError {
+    pub fn error(&self) -> &SymbolError {
+        &self.error
+    }
+    pub fn addr_name(&self) -> &str {
+        &self.addr_name
+    }
+    pub fn set_addr_name(&mut self, addr_name: Ustr) {
+        self.addr_name = addr_name;
+    }
+    pub fn dedup(&self, number: u32) -> Self {
+        let mut n = self.clone();
+        n.addr_name = format!("{}_{}", self.addr_name, number).into();
+        n
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum SymbolEntry {
     Found(FunctionSymbol),
-    NotFound(SymbolError)
+    NotFound(FunctionError),
 }
 
 impl SymbolEntry {
     pub fn full_name(&self) -> &str {
         match self {
             Self::Found(func) => func.addr_name(),
-            Self::NotFound(err) => err.full_name().into()
+            Self::NotFound(err) => err.addr_name(),
         }
     }
     pub fn rva(&self) -> u64 {
         match self {
             Self::Found(func) => func.rva(),
-            Self::NotFound(_) => 0
+            Self::NotFound(_) => 0,
         }
     }
 }
@@ -50,8 +72,8 @@ pub fn format_name_for_addr(s: &str) -> String {
     // }
 
     let mut v: Vec<&str> = s.split("::").collect();
-    let name = v[v.len()-1].replace("~", "_");
-    v.remove(v.len()-1);
+    let name = v[v.len() - 1].replace("~", "_");
+    v.remove(v.len() - 1);
     if v.len() > 0 && v[0].eq("RED4ext") {
         v.remove(0);
     }
@@ -63,7 +85,12 @@ pub fn format_name_for_addr(s: &str) -> String {
     }
 }
 
-pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol], errors: &[SymbolError], safe: bool) -> Result<Vec<SymbolEntry>, Box<dyn std::error::Error>> {
+pub fn write_c_header<W: Write>(
+    mut output: W,
+    symbols: &[FunctionSymbol],
+    errors: &[SymbolError],
+    safe: bool,
+) -> Result<Vec<SymbolEntry>, Box<dyn std::error::Error>> {
     writeln!(output, "{}", HEADER)?;
     let mut all_symbols: Vec<SymbolEntry> = vec![];
     symbols.into_iter().for_each(|f| {
@@ -71,137 +98,197 @@ pub fn write_c_header<W: Write>(mut output: W, symbols: &[FunctionSymbol], error
         n.set_addr_name(format_name_for_addr(f.full_name()).into());
         all_symbols.push(SymbolEntry::Found(n.to_owned()))
     });
-    errors.into_iter().for_each(|f| all_symbols.push(SymbolEntry::NotFound(f.to_owned())));
+    errors.into_iter().for_each(|f| {
+        let fe = FunctionError {
+            error: f.to_owned(),
+            addr_name: format_name_for_addr(f.full_name().into()).into(),
+        };
+        all_symbols.push(SymbolEntry::NotFound(fe))
+    });
 
     all_symbols.sort_by(|a, b| a.full_name().partial_cmp(b.full_name()).unwrap());
     all_symbols.dedup_by(|a, b| a.full_name().eq(b.full_name()) && a.rva() == b.rva());
     let (dedup, dups) = all_symbols.partition_dedup_by(|a, b| a.full_name().eq(b.full_name()));
     // sorted.sort_by(|a, b| a.rva().partial_cmp(&b.rva()).unwrap());
     let mut names_changed: Vec<SymbolEntry> = vec![];
-    dups.iter().for_each(|f| {
-        match f { 
-            SymbolEntry::Found(symbol) => {
-                names_changed.push(SymbolEntry::Found(symbol.dedup().to_owned()));
+    let mut names: HashMap<&str, u32> = HashMap::new();
+    dups.iter().for_each(|f| match f {
+        SymbolEntry::Found(symbol) => {
+            if names.contains_key(symbol.addr_name()) {
+                names.insert(symbol.addr_name(), names[symbol.addr_name()] + 1);
+            } else {
+                names.insert(symbol.addr_name(), 0);
             }
-            SymbolEntry::NotFound(_) =>  names_changed.push(f.to_owned())
+            names_changed.push(SymbolEntry::Found(
+                symbol.dedup(names[symbol.addr_name()]).to_owned(),
+            ));
+        }
+        SymbolEntry::NotFound(symbol) => {
+            if names.contains_key(symbol.addr_name()) {
+                names.insert(symbol.addr_name(), names[symbol.addr_name()] + 1);
+            } else {
+                names.insert(symbol.addr_name(), 0);
+            }
+            names_changed.push(SymbolEntry::NotFound(
+                symbol.dedup(names[symbol.addr_name()]).to_owned(),
+            ));
         }
     });
-    let mut dedupped_symbols: Vec<SymbolEntry> = dedup.iter().chain(names_changed.iter()).map(|e| e.to_owned()).collect();
+    let mut dedupped_symbols: Vec<SymbolEntry> = dedup
+        .iter()
+        .chain(names_changed.iter())
+        .map(|e| e.to_owned())
+        .collect();
     dedupped_symbols.sort_by(|a, b| a.full_name().partial_cmp(b.full_name()).unwrap());
     for entry in &dedupped_symbols {
+        if safe {
+            writeln!(output, "#ifndef {}_Addr", entry.full_name())?;
+        }
         match entry {
             SymbolEntry::Found(symbol) => {
                 // let addr_name = format_name_for_addr(symbol.full_name());
                 // symbol.set_addr_name(addr_name.into());
                 let addr_name = symbol.addr_name();
-                if safe {
-                    writeln!(
-                        output,
-                        "#ifndef {addr_name}_Addr\n#define {addr_name}_Addr 0x{:X}\n#endif",
-                        symbol.rva()
-                    )?;
-                } else {
-                    writeln!(
-                        output,
-                        "#define {addr_name}_Addr 0x{:X}",
-                        symbol.rva()
-                    )?;
-                }
-            },
-            SymbolEntry::NotFound(error) => {
-                let addr_name = format_name_for_addr(error.full_name().into());
-                if safe {
-                    writeln!(
-                        output,
-                        "#ifndef {addr_name}_Addr\n{0: <119}\\\n{1: <119}\\\n{2}\n#endif",
-                        format!("#define {addr_name}_Addr"),
-                        format!(r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#),
-                        format!(r#"              "is 0 - Zoltan found {}\")")"#, error.to_string())
-                    )?;
-                } else {
-                    writeln!(
-                        output,
-                        "{0: <119}\\\n{1: <119}\\\n{2}",
-                        format!("#define {addr_name}_Addr"),
-                        format!(r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#),
-                        format!(r#"              "is 0 - Zoltan found {}\")")"#, error.to_string())
-                    )?;
-                }
+                writeln!(output, "#define {addr_name}_Addr 0x{:X}", symbol.rva())?;
             }
+            SymbolEntry::NotFound(error) => {
+                let addr_name = error.addr_name();
+                writeln!(
+                    output,
+                    "{0: <119}\\\n{1: <119}\\\n{2}",
+                    format!("#define {addr_name}_Addr"),
+                    format!(
+                        r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#
+                    ),
+                    format!(r#"              "is 0 - Zoltan found {}\")")"#, error.error())
+                )?;
+            }
+        }
+        if safe {
+            writeln!(output, "#endif")?;
         }
     }
 
     Ok(dedupped_symbols)
 }
 
-pub fn write_c_definition<W: Write>(mut output: W, symbols: &[FunctionSymbol], errors: &[SymbolError], safe: bool) -> Result<()> {
+pub fn write_c_definition<W: Write>(
+    mut output: W,
+    symbols: &[FunctionSymbol],
+    errors: &[SymbolError],
+    safe: bool,
+) -> Result<()> {
     writeln!(output, "#pragma once")?;
     let header_objects = write_c_header(output.by_ref(), symbols, errors, safe)?;
     writeln!(output, "\n#include <RED4ext/RED4ext.hpp>")?;
     writeln!(output, "#include <RED4ext/Relocation.hpp>")?;
     let mut sorted: Vec<FunctionSymbol> = vec![];
-    header_objects.iter().for_each(|f|
-        match f {
-            SymbolEntry::Found(entry) => sorted.push(entry.to_owned()),
-            _ => {}
-        }
-    );
+    header_objects.iter().for_each(|f| match f {
+        SymbolEntry::Found(entry) => sorted.push(entry.to_owned()),
+        _ => {}
+    });
     // writeln!(output, "#ifdef RED4EXT_STATIC_LIB")?;
     // let mut sorted = symbols.to_vec();
     // sorted.sort_by(|a, b| a.name().partial_cmp(b.name()).unwrap());
     // sorted.dedup_by(|a, b| a.name().eq(b.name()) && a.rva() == b.rva());
     // sorted.sort_by(|a, b| a.rva().partial_cmp(&b.rva()).unwrap());
     // let map: HashMap<Ustr, &FunctionSymbol> = sorted.iter().filter(|s| s.file_name().is_some()).map(|s| (s.file_name().unwrap(), s)).into_iter().collect();
-    let map = sorted.iter().filter(|s| s.file_name().is_some()).group_by(|s| s.file_name().unwrap());
+    let map = sorted
+        .iter()
+        .filter(|s| s.file_name().is_some())
+        .group_by(|s| s.file_name().unwrap());
     for (file_name, _group) in map.into_iter() {
         let file_path = Path::new(file_name.as_ref());
         if let Some(_) = file_name.find("RED4ext/") {
             let prefix = file_name.rsplit_once("RED4ext/").unwrap().0;
-            writeln!(output, "#include <{}>", file_path.strip_prefix(prefix).unwrap().as_os_str().to_str().unwrap().to_string())?;
+            writeln!(
+                output,
+                "#include <{}>",
+                file_path
+                    .strip_prefix(prefix)
+                    .unwrap()
+                    .as_os_str()
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            )?;
         }
     }
     // writeln!(output, "#endif")?;
     writeln!(output, "")?;
-    
+
     for symbol in sorted {
         if !symbol.needs_impl() {
-            continue
+            continue;
         }
         match symbol.function_type() {
             Type::Function(func) => {
                 let args;
-                let headerTypes;
+                let header_types;
                 let header;
+                let return_type = if func.func_type == FunctionEnum::Constructor {
+                    "".to_owned().into()
+                } else {
+                    func.return_type.name()
+                };
                 match func.func_type {
-                    FunctionEnum::Virtual | FunctionEnum::Constructor | FunctionEnum::Destructor => continue,
-                    FunctionEnum::Method => {
-                        header = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name_with_id(format!("a{}", i).as_str())).join(", ");
-                        headerTypes = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name()).join(", ");
-                        args = func.params.iter().enumerate().map(|(i, _f)| {
-                        if i == 0 { 
-                            "this".into()
-                        } else { 
-                            format!("a{}", i)
-                        }}).join(", ");
-                    },
+                    FunctionEnum::Virtual => continue,
+                    FunctionEnum::Method | FunctionEnum::Constructor | FunctionEnum::Destructor => {
+                        header = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _f)| *i != 0)
+                            .map(|(i, f)| f.name_with_id(format!("a{}", i).as_str()))
+                            .join(", ");
+                        header_types = func.params.iter().map(|f| f.name()).join(", ");
+                        args = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .map(|(i, _f)| if i == 0 { "this".into() } else { format!("a{}", i) })
+                            .join(", ");
+                    }
                     FunctionEnum::Typedef => {
-                        header = func.params.iter().enumerate().map(|(i, f)| f.name_with_id(format!("a{}", i).as_str())).join(", ");
-                        headerTypes = func.params.iter().enumerate().map(|(i, f)| f.name()).join(", ");
-                        args = func.params.iter().enumerate().map(|(i, _f)| format!("a{}", i)).join(", ");
-                    },
+                        header = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .map(|(i, f)| f.name_with_id(format!("a{}", i).as_str()))
+                            .join(", ");
+                        header_types = func.params.iter().map(|f| f.name()).join(", ");
+                        args = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .map(|(i, _f)| format!("a{}", i))
+                            .join(", ");
+                    }
                     FunctionEnum::Static => {
-                        header = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name_with_id(format!("a{}", i).as_str())).join(", ");
-                        headerTypes = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, f)| f.name()).join(", ");
-                        args = func.params.iter().enumerate().filter(|(i, _f)| *i != 0).map(|(i, _f)| format!("a{}", i)).join(", ");
-                    },
+                        header = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _f)| *i != 0)
+                            .map(|(i, f)| f.name_with_id(format!("a{}", i).as_str()))
+                            .join(", ");
+                        header_types = func.params.iter().map(|f| f.name()).join(", ");
+                        args = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _f)| *i != 0)
+                            .map(|(i, _f)| format!("a{}", i))
+                            .join(", ");
+                    }
                 }
                 // let func_type = format!("decltype(&{})", symbol.full_name());
-                let func_type = format!("{} (*)({})", func.return_type.name(), headerTypes);
+                let func_type = format!("{} (*)({})", func.return_type.name(), header_types);
                 let using = format!("using {}_t = {};", symbol.addr_name(), func_type);
                 writeln!(
                     output,
-                    "inline {} {}({}) {{\n    {}\n    RED4ext::RelocFunc<{}_t> call({}_Addr);\n    return call({});\n}}\n",
-                    func.return_type.name(),
+                    "RED4EXT_INLINE {} {}({}) {{\n    {}\n    RED4ext::RelocFunc<{}_t> call({}_Addr);\n    return call({});\n}}\n",
+                    return_type,
                     symbol.full_name(),
                     header,
                     using,
@@ -210,9 +297,7 @@ pub fn write_c_definition<W: Write>(mut output: W, symbols: &[FunctionSymbol], e
                     args
                 )?;
             }
-            _ => {
-
-            }
+            _ => {}
         }
     }
     // for (file_name, group) in map.into_iter() {
@@ -283,16 +368,15 @@ pub fn write_rust_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) ->
 }
 
 pub fn format_name_for_idc(s: &str) -> String {
-    s
-    .replace("RED4ext::", "")
-    .replace("::", "")
-    .replace('<', "_")
-    .replace('>', "")
-    .replace(',', "_")
-    .replace('*', "_p")
-    .replace('&', "_r")
-    .replace(' ', "")
-    .replace('~', "__")
+    s.replace("RED4ext::", "")
+        .replace("::", "")
+        .replace('<', "_")
+        .replace('>', "")
+        .replace(',', "_")
+        .replace('*', "_p")
+        .replace('&', "_r")
+        .replace(' ', "")
+        .replace('~', "__")
 }
 
 pub fn write_idc_headers<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
@@ -351,49 +435,49 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
     for (id, struc) in &info.structs {
         let safe_id;
         // if let Some(nice_name) = struc.nice_name {
-            // safe_id = nice_name.to_string();
+        // safe_id = nice_name.to_string();
         // } else {
-            safe_id = id.to_string();
-        // } 
+        safe_id = id.to_string();
+        // }
 
         // if struc.members.len() != 0 || struc.base.len() > 0 || (struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info)) {
-            writeln!(out)?;
-            writeln!(out, "// START_DECL TYPE")?;
-            // should actually handle pack pragmas in the type parsing
-            if safe_id.starts_with("RED4ext::CString") {
-                writeln!(out, "#pragma pack(4)")?;
-            }
-            write!(out, "struct ")?;
-            if struc.base.len() > 0 {
-                write!(out, "__cppobj ")?;
-            }
-            write!(out, "{id} ")?;
-            if struc.base.len() > 0 {
-                let base = itertools::join(&struc.base, ", ");
-                write!(out, ": {base}")?;
-            }
-            writeln!(out, " {{")?;
+        writeln!(out)?;
+        writeln!(out, "// START_DECL TYPE")?;
+        // should actually handle pack pragmas in the type parsing
+        if safe_id.starts_with("RED4ext::CString") {
+            writeln!(out, "#pragma pack(4)")?;
+        }
+        write!(out, "struct ")?;
+        if struc.base.len() > 0 {
+            write!(out, "__cppobj ")?;
+        }
+        write!(out, "{id} ")?;
+        if struc.base.len() > 0 {
+            let base = itertools::join(&struc.base, ", ");
+            write!(out, ": {base}")?;
+        }
+        writeln!(out, " {{")?;
 
-            if struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info) {
-                writeln!(out, r#"{pad}{id}_vtbl *__vftable;"#)?;
-            }
+        if struc.has_direct_virtual_methods() && !struc.has_indirect_virtual_methods(info) {
+            writeln!(out, r#"{pad}{id}_vtbl *__vftable;"#)?;
+        }
 
-            for (i, m) in struc.members.iter().enumerate() {
-                if m.is_bitfield {
-                    let bit_size = struc
-                        .members
-                        .get(i + 1)
-                        .and_then(|m| m.bit_offset)
-                        .zip(m.bit_offset)
-                        .map(|(a, b)| a - b)
-                        .unwrap_or(1);
-                    writeln!(out, "{pad}{}: {bit_size};", m.typ.name_with_id(&m.name))?;
-                } else {
-                    writeln!(out, "{pad}{};", m.typ.name_with_id(&m.name))?;
-                }
+        for (i, m) in struc.members.iter().enumerate() {
+            if m.is_bitfield {
+                let bit_size = struc
+                    .members
+                    .get(i + 1)
+                    .and_then(|m| m.bit_offset)
+                    .zip(m.bit_offset)
+                    .map(|(a, b)| a - b)
+                    .unwrap_or(1);
+                writeln!(out, "{pad}{}: {bit_size};", m.typ.name_with_id(&m.name))?;
+            } else {
+                writeln!(out, "{pad}{};", m.typ.name_with_id(&m.name))?;
             }
-            writeln!(out, "}}")?;
-            writeln!(out, "// END_DECL")?;
+        }
+        writeln!(out, "}}")?;
+        writeln!(out, "// END_DECL")?;
         // }
 
         if struc.rva != 0 {
@@ -403,7 +487,7 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             writeln!(out, "// END_DECL")?;
         }
 
-        if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)  {
+        if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0) {
             writeln!(out)?;
             writeln!(out, "// START_DECL TYPE")?;
             write!(out, "struct ")?;
@@ -436,12 +520,14 @@ pub fn write_idc_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             }
             writeln!(out, "}}")?;
             writeln!(out, "// END_DECL")?;
-
         }
     }
 
     for (id, struc) in &info.structs {
-        if struc.has_virtual_methods(info) && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)  && struc.rva != 0 {
+        if struc.has_virtual_methods(info)
+            && (struc.virtual_methods.len() > 0 || struc.base.len() > 0)
+            && struc.rva != 0
+        {
             writeln!(out)?;
             writeln!(out, "// START_DECL VSTRUCT {}", struc.rva)?;
             writeln!(out, "{id}_vtbl")?;
@@ -494,7 +580,7 @@ pub fn write_idc_vfuns<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             }
             if serial {
                 writeln!(out)?;
-                writeln!(out, "// START_DECL VFUNC {}", struc.rva)?;                    
+                writeln!(out, "// START_DECL VFUNC {}", struc.rva)?;
                 writeln!(
                     out,
                     "typedef {} {}({safe_id} *__hidden this);",
@@ -507,7 +593,11 @@ pub fn write_idc_vfuns<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
                 // let rva = m.offset;
                 writeln!(out)?;
                 writeln!(out, "// START_DECL VFUNC {rva}")?;
-                let safe_name = format!("{}_{}", format_name_for_idc(safe_id.as_ref()), format_name_for_idc(m.name.as_ref()));
+                let safe_name = format!(
+                    "{}_{}",
+                    format_name_for_idc(safe_id.as_ref()),
+                    format_name_for_idc(m.name.as_ref())
+                );
                 if m.typ.params.is_empty() {
                     writeln!(
                         out,
@@ -531,7 +621,11 @@ pub fn write_idc_vfuns<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
                 // let rva = m.offset;
                 writeln!(out)?;
                 writeln!(out, "// START_DECL VFUNC {rva}")?;
-                let safe_name = format!("{}_{}", format_name_for_idc(safe_id.as_ref()), format_name_for_idc(m.name.as_ref()));
+                let safe_name = format!(
+                    "{}_{}",
+                    format_name_for_idc(safe_id.as_ref()),
+                    format_name_for_idc(m.name.as_ref())
+                );
                 if m.typ.params.is_empty() {
                     writeln!(
                         out,

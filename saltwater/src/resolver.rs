@@ -46,7 +46,9 @@ impl TypeResolver {
                     .map(|arg| self.resolve_type(&arg.get().ctype))
                     .collect::<Result<Vec<_>>>()?;
                 let ret_type = self.resolve_type(&fn_type.return_type)?;
-                Ok(Type::Function(FunctionType::new(args, ret_type, FunctionEnum::Method).into()))
+                Ok(Type::Function(
+                    FunctionType::new(args, ret_type, FunctionEnum::Method).into(),
+                ))
             }
             saltwater::Type::Union(saltwater::StructType::Anonymous(vars)) => {
                 let id = self.resolve_union(None, vars, typ.sizeof().ok())?;

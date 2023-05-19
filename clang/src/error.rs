@@ -30,4 +30,13 @@ impl Error {
             .join("\n");
         Error::CompilerErrors(msg)
     }
+    
+    pub fn warning_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
+        let msg = diagnostics
+            .iter()
+            .map(|err| err.formatter().format())
+            .collect::<Vec<_>>()
+            .join("\n");
+        Error::CompilerErrors(msg)
+    }
 }

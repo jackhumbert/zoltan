@@ -20,11 +20,17 @@ pub struct FunctionSpec {
     pub eval: Option<Expr>,
     pub nth_entry_of: Option<(usize, usize)>,
     pub file_name: Option<Ustr>,
-    pub needs_impl: bool
+    pub needs_impl: bool,
 }
 
 impl FunctionSpec {
-    pub fn new<'a, I>(name: Ustr, full_name: Ustr, spec_type: Type, comments: I, file_name: Option<Ustr>) -> Option<Result<Self>>
+    pub fn new<'a, I>(
+        name: Ustr,
+        full_name: Ustr,
+        spec_type: Type,
+        comments: I,
+        file_name: Option<Ustr>,
+    ) -> Option<Result<Self>>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -48,13 +54,13 @@ impl FunctionSpec {
         full_name: Ustr,
         spec_type: Type,
         mut params: HashMap<&str, &str>,
-        file_name: Option<Ustr>
+        file_name: Option<Ustr>,
     ) -> Result<Self, ParamError> {
         let pattern = Pattern::parse(params.remove("pattern").ok_or(ParamError::MissingPattern)?)
             .map_err(|err| ParamError::ParseError("pattern", err))?;
         let offset = params
             .remove("offset")
-            .map(|str| parse_from_str(str, "offset"))
+            .map(|str| parse_offset_from_str(str, "offset"))
             .transpose()?;
         let eval = params
             .remove("eval")
@@ -64,7 +70,7 @@ impl FunctionSpec {
         let needs_impl = params.remove("noimpl").is_none();
         let nth_entry_of = params.remove("nth").map(parse_index_specifier).transpose()?;
         for key in params.keys() {
-            log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
+            // log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
             // return Err(ParamError::UnknownParam(str.deref().to_owned()));
         }
 
@@ -77,7 +83,7 @@ impl FunctionSpec {
             eval,
             nth_entry_of,
             file_name,
-            needs_impl
+            needs_impl,
         })
     }
 }
@@ -112,13 +118,22 @@ where
         .map_err(|err: F::Err| ParamError::InvalidParam(field, err.to_string()))
 }
 
+fn parse_offset_from_str(str: &str, field: &'static str) -> Result<i64, ParamError> {
+    str.parse()
+        .or_else(|s| {
+            let without_prefix = str.replace("0x", "");
+            i64::from_str_radix(&without_prefix, 16)
+        })
+        .map_err(|err| ParamError::InvalidParam(field, err.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use std::assert_matches::assert_matches;
 
     use super::*;
     use crate::eval::Expr;
-    use crate::types::{Type, FunctionEnum};
+    use crate::types::{FunctionEnum, Type};
 
     #[test]
     fn parse_valid_spec() {
@@ -129,13 +144,46 @@ mod tests {
             "/// @offset 13",
             "/// @eval fn",
         ];
-        let spec = FunctionSpec::new("test".into(), "test::test".into(), spec_type.into(), comment.into_iter());
+        let spec = FunctionSpec::new(
+            "test".into(),
+            "test::test".into(),
+            Type::Function(spec_type.into()),
+            comment.into_iter(),
+            None,
+        );
 
         assert_matches!(
             spec,
             Some(Ok(FunctionSpec {
                 nth_entry_of: Some((5, 24)),
                 offset: Some(13),
+                eval: Some(Expr::Ident(_)),
+                ..
+            }))
+        )
+    }
+    #[test]
+    fn parse_valid_hex_spec() {
+        let spec_type = FunctionType::new(vec![], Type::Void, FunctionEnum::Typedef);
+        let comment = [
+            "/// @pattern E8 (fn:rel) 45 8B 86 70 01 00 00 33 C9 BA 05 00 00 00 C7 44 24 30 02 00 00 00",
+            "/// @nth 5/24",
+            "/// @offset -0x13",
+            "/// @eval fn",
+        ];
+        let spec = FunctionSpec::new(
+            "test".into(),
+            "test::test".into(),
+            Type::Function(spec_type.into()),
+            comment.into_iter(),
+            None,
+        );
+
+        assert_matches!(
+            spec,
+            Some(Ok(FunctionSpec {
+                nth_entry_of: Some((5, 24)),
+                offset: Some(-0x13),
                 eval: Some(Expr::Ident(_)),
                 ..
             }))
