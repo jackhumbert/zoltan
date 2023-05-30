@@ -99,6 +99,7 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                 .parser(p)
                 .arguments(&arguments)
                 .single_file_parse(opts.r4e_output_path.is_none() && opts.idc_output_path.is_none())
+                // .single_file_parse(true)
                 .detailed_preprocessing_record(true)
                 .briefs_in_completion_results(true)
                 // .incomplete(true)
@@ -141,8 +142,12 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                 } else {
                     true
                 };
-            if is_project_file || opts.eager_type_export {
+            if is_project_file || opts.eager_type_export || opts.r4e_output_path.is_some() {
                 match ent.get_kind() {
+                    EntityKind::InclusionDirective => {
+                        // log::info!("{}", ent.get_name().unwrap_or("No name".to_owned()));
+                        EntityVisitResult::Recurse
+                    },
                     EntityKind::MacroDefinition |
                     EntityKind::MacroExpansion => {
                         EntityVisitResult::Recurse

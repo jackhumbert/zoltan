@@ -216,6 +216,8 @@ impl TypeResolver {
                 }
             }
         }
+        // let name = typ.get_display_name();
+        // log::info!("{}", &name);
 
         let mut res = match typ.get_kind() {
             clang::TypeKind::Void => Type::Void,
@@ -264,6 +266,7 @@ impl TypeResolver {
                 } else {
                     // template argument
                     let name = typ.get_display_name().into();
+                    // log::info!("{}", &name);
                     self.local_types
                         .get(&name)
                         .ok_or(Error::UnresolvedType(name))?

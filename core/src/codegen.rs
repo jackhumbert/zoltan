@@ -272,7 +272,13 @@ pub fn write_c_definition<W: Write>(
                             .filter(|(i, _f)| *i != 0)
                             .map(|(i, f)| f.name_with_id(format!("a{}", i).as_str()))
                             .join(", ");
-                        header_types = func.params.iter().map(|f| f.name()).join(", ");
+                        header_types = func
+                            .params
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _f)| *i != 0)
+                            .map(|(_i, f)| f.name())
+                            .join(", ");
                         args = func
                             .params
                             .iter()
@@ -287,14 +293,10 @@ pub fn write_c_definition<W: Write>(
                 let using = format!("using {}_t = {};", symbol.addr_name(), func_type);
                 writeln!(
                     output,
-                    "RED4EXT_INLINE {} {}({}) {{\n    {}\n    RED4ext::RelocFunc<{}_t> call({}_Addr);\n    return call({});\n}}\n",
-                    return_type,
+                    "RED4EXT_INLINE {return_type} {}({header}) {{\n    {using}\n    RED4ext::RelocFunc<{}_t> call({}_Addr);\n    return call({args});\n}}\n",
                     symbol.full_name(),
-                    header,
-                    using,
                     symbol.addr_name(),
                     symbol.addr_name(),
-                    args
                 )?;
             }
             _ => {}
