@@ -32,7 +32,7 @@ pub fn resolve_in_exe(
     let mut syms = vec![];
     let mut notf = vec![];
     let mut errs = vec![];
-    for (i, fun) in specs.into_iter().enumerate() {
+    for (i, fun) in specs.iter().enumerate() {
         match match_map.get(&i).map(|vec| &vec[..]) {
             Some([addr]) => syms.push(resolve_symbol(fun, exe, *addr)?),
             Some(addrs) => {
@@ -41,58 +41,60 @@ pub fn resolve_in_exe(
                         Some(rva) if max == addrs.len() || max == 0 => {
                             syms.push(resolve_symbol(fun, exe, *rva)?)
                         }
+                        _ => { }
+                    }
+                }
+            }
+            None => { }
+        }
+    }    
+    for mat in patterns::multi_search_syms(specs.iter().map(|spec| &spec.pattern), exe.rdata(), &syms) {
+        match_map
+            .entry(mat.pattern)
+            .or_default()
+            .push(mat.rva + exe.rdata_offset_from_base());
+    }
+    for (i, fun) in specs.iter().enumerate() {
+        match match_map.get(&i).map(|vec| &vec[..]) {
+            Some([addr]) => {
+                let symbol = resolve_symbol(fun, exe, *addr)?;
+                if !syms.contains(&symbol) {
+                    syms.push(symbol);
+                }
+            },
+            Some(addrs) => {
+                if let Some((n, max)) = fun.nth_entry_of {
+                    match addrs.get(n) {
+                        Some(rva) if max == addrs.len() || max == 0 => {
+                            let symbol = resolve_symbol(fun, exe, *rva)?;
+                            if !syms.contains(&symbol) {
+                                syms.push(symbol);
+                            }
+                        }
                         Some(_) => {
                             errs.push(SymbolError::CountMismatch(fun.full_name, addrs.len()));
-                            notf.push(FunctionSymbol::new(
-                                fun.name,
-                                fun.full_name,
-                                fun.spec_type,
-                                0,
-                                fun.file_name,
-                                fun.needs_impl,
-                            ));
+                            notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
                         }
                         None => {
                             errs.push(SymbolError::NotEnoughMatches(fun.full_name, addrs.len()));
-                            notf.push(FunctionSymbol::new(
-                                fun.name,
-                                fun.full_name,
-                                fun.spec_type,
-                                0,
-                                fun.file_name,
-                                fun.needs_impl,
-                            ));
+                            notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
                         }
                     }
                 } else {
                     errs.push(SymbolError::MoreThanOneMatch(fun.full_name, addrs.len()));
-                    notf.push(FunctionSymbol::new(
-                        fun.name,
-                        fun.full_name,
-                        fun.spec_type,
-                        0,
-                        fun.file_name,
-                        fun.needs_impl,
-                    ));
+                    notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
                 }
             }
             None => {
                 errs.push(SymbolError::NoMatches(fun.full_name));
-                notf.push(FunctionSymbol::new(
-                    fun.name,
-                    fun.full_name,
-                    fun.spec_type,
-                    0,
-                    fun.file_name,
-                    fun.needs_impl,
-                ));
+                notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
             }
         }
-    }
+    }    
     Ok((syms, errs, notf))
 }
 
-fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result<FunctionSymbol> {
+fn resolve_symbol(spec: &FunctionSpec, data: &ExecutableData, rva: u64) -> Result<FunctionSymbol> {
     let res = match &spec.eval {
         Some(expr) => {
             expr.eval(&EvalContext::new(&spec.pattern, data, data.rel_offset(rva))?)? - data.image_base()
@@ -102,7 +104,7 @@ fn resolve_symbol(spec: FunctionSpec, data: &ExecutableData, rva: u64) -> Result
     Ok(FunctionSymbol::new(
         spec.name,
         spec.full_name,
-        spec.spec_type,
+        spec.spec_type.clone(),
         res,
         spec.file_name,
         spec.needs_impl,

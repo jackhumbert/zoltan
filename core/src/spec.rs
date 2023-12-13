@@ -35,7 +35,24 @@ impl FunctionSpec {
         I: IntoIterator<Item = &'a str>,
     {
         let mut params = HashMap::new();
+        let mut stripped_comments = vec![];
         for comment in comments {
+            let stripped = comment
+                .trim_start()
+                .strip_prefix("///")
+                .or_else(|| comment.trim_start().strip_prefix("*"))?
+                .trim_start()
+                .to_string();
+            if stripped.starts_with("@") {
+                stripped_comments.push(stripped);
+            } else {
+                if let Some(last) = stripped_comments.last_mut() {
+                    last.push(' ');
+                    last.push_str(stripped.as_str());
+                }
+            }
+        }
+        for comment in stripped_comments.iter().map(String::as_str) {
             if let Some((key, val)) = parse_typedef_comment(comment) {
                 params.insert(key, val);
             }
@@ -89,15 +106,12 @@ impl FunctionSpec {
 }
 
 fn parse_typedef_comment(line: &str) -> Option<(&str, &str)> {
+    // log::info!("Comment: {line}");
     let (key, val) = line
-        .trim_start()
-        .strip_prefix("///")
-        .or_else(|| line.trim_start().strip_prefix("*"))?
-        .trim_start()
         .strip_prefix('@')?
         .split_once(' ')?;
 
-    Some((key, val.trim()))
+    Some((key.clone(), val.trim().clone()))
 }
 
 fn parse_index_specifier(str: &str) -> Result<(usize, usize), ParamError> {

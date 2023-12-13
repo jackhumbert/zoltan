@@ -56,6 +56,17 @@ impl<'a> ExecutableData<'a> {
         Ok(u64::from_ne_bytes(bytes))
     }
 
+    pub fn resolve_call_rdata(&self, addr: u64) -> Result<u64> {
+        let addr = addr as usize - self.rdata_offset as usize;
+        let bytes = self
+            .rdata
+            .get(addr..addr + std::mem::size_of::<u64>())
+            .ok_or(Error::InvalidAccess(addr))?
+            .try_into()
+            .unwrap();
+        Ok(u64::from_ne_bytes(bytes) - 0x0140000000)
+    }
+
     pub fn text(&'a self) -> &'a [u8] {
         self.text
     }

@@ -114,6 +114,91 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug executable 'zoltan-clang' idc-output",
+            "presentation": {
+                "hidden": false,
+                "group": "build",
+                "order": 1,
+                "clear": true,
+                "reuse": true
+            },
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=zoltan-clang",
+                    "--package=zoltan-clang"
+                ],
+                "filter": {
+                    "name": "zoltan-clang",
+                    "kind": "bin"
+                }
+            }, 
+            "args": [
+                // "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\src\\red4ext\\",
+                "C:\\Users\\Jack\\Documents\\cyberpunk\\IDA_Cyberpunk_2077\\header.hpp",
+                // "D:\\Code\\RED4ext\\deps\\red4ext.sdk\\include\\RED4ext\\Process.hpp",
+                "-x",
+                "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe",
+                "-s",
+                "-f=\"-include stdafx.hpp\"",
+                "-f=-std=c++20",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\cyberpunk_cmake\\include",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\detours\\src",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\spdlog\\include",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\archive_xl\\support\\red4ext",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\tweak_xl\\support\\red4ext",
+                // "-f=ID:\\Code\\RED4ext\\deps\\red4ext.sdk\\include",
+                // "--eager-type-export",
+                // "--r4e-output=Definitions.hpp",
+                // "-f=\"-include Utils/FlightModule.hpp\"",
+                "-f=-DRED4EXT_STATIC_LIB",
+                "--safe-addr",
+                // "--eager-type-export",
+                "--idc-output=C:\\Users\\Jack\\Documents\\cyberpunk\\IDA_Cyberpunk_2077\\types.c",
+                // "--r4e-output=C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\src\\red4ext\\Definitions.hpp"
+                // "--c-output=Addresses.hpp"
+                // "--c-output=C:\\Users\\Jack\\Documents\\cyberpunk\\IDA_Cyberpunk_2077\\addresses.h"
+            ],
+            "cwd": "${workspaceFolder}",
+            // "console": "internalConsole",
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Find All Addresses",
+            "presentation": {
+                "hidden": false,
+                "group": "build",
+                "order": 1,
+                "clear": true,
+                "reuse": true
+            },
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=zoltan-clang",
+                    "--package=zoltan-clang"
+                ],
+                "filter": {
+                    "name": "zoltan-clang",
+                    "kind": "bin"
+                }
+            }, 
+            "args": [
+                "C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include\\",
+                "-x",
+                "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe",
+                "-f=-std=c++20",
+                "-f=-IC:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include",
+                "--c-output=C:\\Users\\Jack\\Documents\\cyberpunk\\flight_control\\deps\\red4ext.sdk\\include\\RED4ext\\Addresses-Found.hpp"
+            ],
+            "cwd": "${workspaceFolder}",
+            // "console": "internalConsole",
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug unit tests in executable 'zoltan-clang'",
             "cargo": {
                 "args": [

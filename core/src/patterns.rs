@@ -1,6 +1,8 @@
 use aho_corasick::AhoCorasick;
 use enum_as_inner::EnumAsInner;
 
+use crate::{symbols::FunctionSymbol, codegen::format_name_for_addr};
+
 #[derive(Debug, EnumAsInner)]
 pub enum PatItem {
     Byte(u8),
@@ -15,6 +17,38 @@ impl PatItem {
             PatItem::Byte(_) => 1,
             PatItem::Any => 1,
             PatItem::Group(_, VarType::Rel) => 4,
+            PatItem::Group(_, VarType::Call) => 8,
+            PatItem::Group(_, VarType::Ref) => 8,
+            PatItem::Group(_, VarType::PureCall) => 8,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            PatItem::Byte(b) => vec![*b],
+            PatItem::Any => vec![],
+            PatItem::Group(_, VarType::Rel) => vec![],
+            PatItem::Group(_, VarType::Call) => vec![],
+            PatItem::Group(_, VarType::Ref) => vec![],
+            PatItem::Group(_, VarType::PureCall) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
+        }
+    }
+
+    pub fn to_bytes_ref(&self, syms: &Vec<FunctionSymbol>) -> Vec<u8> {
+        match self {
+            PatItem::Byte(b) => vec![*b],
+            PatItem::Any => vec![],
+            PatItem::Group(_, VarType::Rel) => vec![],
+            PatItem::Group(_, VarType::Call) => vec![],
+            PatItem::Group(name, VarType::Ref) => {
+                if let Some(sym) = syms.iter().find(|x| format_name_for_addr(x.full_name()) == *name) {
+                    // log::info!("Addr for ({name}:ref): {:X}", sym.rva() + 0x0140000000);
+                    u64::to_ne_bytes(sym.rva() + 0x0140000000).into() 
+                } else {
+                    vec![]
+                }
+            },
+            PatItem::Group(_, VarType::PureCall) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
         }
     }
 }
@@ -22,6 +56,9 @@ impl PatItem {
 #[derive(Debug, Clone, Copy)]
 pub enum VarType {
     Rel,
+    Call,
+    PureCall,
+    Ref
 }
 
 #[derive(Debug)]
@@ -40,6 +77,7 @@ impl Pattern {
     }
 
     pub fn parse(str: &str) -> Result<Self, peg::error::ParseError<peg::str::LineCol>> {
+        // log::info!("Parsing: {str}");
         pattern::pattern(str)
     }
 
@@ -73,9 +111,64 @@ impl Pattern {
                         return false;
                     }
                 }
-                PatItem::Group(_, _) => {
-                    if bytes.advance_by(pat.size()).is_err() {
+                PatItem::Group(_, var_type) => {
+                    match var_type {
+                        VarType::Rel | VarType::Call => if bytes.advance_by(pat.size()).is_err() {
+                            return false;
+                        },
+                        VarType::Ref => return false,
+                        VarType::PureCall => {
+                            let pure_call_bytes: [u8; 8] = [0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00];
+                            for pure_call_byte in pure_call_bytes {
+                                if bytes.next() != Some(&pure_call_byte) {
+                                    return false
+                                }
+                            }
+                        }
+                    }
+                }
+                PatItem::Any => {
+                    bytes.next();
+                }
+            }
+        }
+        true
+    }
+
+    fn does_match_ref(&self, bytes: &[u8], syms: &Vec<FunctionSymbol>) -> bool {
+        let mut bytes = bytes.iter();
+        for pat in self.parts() {
+            match pat {
+                PatItem::Byte(expected) => {
+                    if bytes.next() != Some(expected) {
                         return false;
+                    }
+                }
+                PatItem::Group(name, var_type) => {
+                    match var_type {
+                        VarType::Rel | VarType::Call => if bytes.advance_by(pat.size()).is_err() {
+                            return false;
+                        },
+                        VarType::PureCall => {
+                            let pure_call_bytes: [u8; 8] = [0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00];
+                            for pure_call_byte in pure_call_bytes {
+                                if bytes.next() != Some(&pure_call_byte) {
+                                    return false
+                                }
+                            }
+                        },
+                        VarType::Ref => {
+                            if let Some(sym) = syms.iter().find(|x| format_name_for_addr(x.full_name()) == *name) {
+                                let pure_call_bytes: [u8; 8] = u64::to_ne_bytes(sym.rva() + 0x0140000000).into();
+                                for pure_call_byte in pure_call_bytes {
+                                    if bytes.next() != Some(&pure_call_byte) {
+                                        return false
+                                    }
+                                }
+                            } else {
+                                return false;
+                            }
+                        }
                     }
                 }
                 PatItem::Any => {
@@ -88,7 +181,14 @@ impl Pattern {
 
     fn longest_byte_sequence(&self) -> &[PatItem] {
         self.parts()
-            .group_by(|a, b| a.as_byte().is_some() && b.as_byte().is_some())
+            .group_by(|a, b| !a.to_bytes().is_empty() && !b.to_bytes().is_empty())
+            .max_by_key(|parts| parts.len())
+            .unwrap_or_default()
+    }
+
+    fn longest_byte_sequence_ref(&self, syms: &Vec<FunctionSymbol>) -> &[PatItem] {
+        self.parts()
+            .group_by(|a, b| !a.to_bytes_ref(syms).is_empty() && !b.to_bytes_ref(syms).is_empty())
             .max_by_key(|parts| parts.len())
             .unwrap_or_default()
     }
@@ -97,15 +197,19 @@ impl Pattern {
 peg::parser! {
     grammar pattern() for str {
         rule _() =
-            quiet!{[' ' | '\t']*}
+            quiet!{[' ' | '\t' | '\n' | '\\']*}
         rule byte() -> u8
             = n:$(['0'..='9' | 'A'..='F']*<2>) {? u8::from_str_radix(n, 16).or(Err("byte")) }
         rule any()
             = "?"
         rule ident() -> String
-            = id:$(['a'..='z' | 'A'..='Z' | '_']+) { id.to_owned() }
+            = id:$(['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { id.to_owned() }
         rule var_type() -> VarType
             = "rel" { VarType::Rel }
+            / "call" { VarType::Call }
+            / "purecall" { VarType::PureCall }
+            / "pure" { VarType::PureCall }
+            / "ref" { VarType::Ref }
         rule item() -> PatItem
             = n:byte() { PatItem::Byte(n) }
             / any() { PatItem::Any }
@@ -127,7 +231,15 @@ where
         let start = offset_from(pat.parts(), seq);
         let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
         items.push((pat, offset));
-        sequences.push(seq.iter().filter_map(PatItem::as_byte).cloned().collect());
+        // sequences.push(seq.iter().filter_map(PatItem::as_byte).cloned().collect());
+        sequences.push(seq.iter().flat_map(|x| {
+            let bytes = x.to_bytes();
+            if bytes.is_empty() {
+                None
+            } else {
+                Some(bytes.as_slice().to_owned())
+            }
+        }).flatten().collect());
     }
 
     let ac = AhoCorasick::new(&sequences);
@@ -135,15 +247,65 @@ where
 
     for mat in ac.find_overlapping_iter(haystack) {
         let (pat, offset) = items[mat.pattern()];
-        let start = mat.start() - offset;
-        let slice = &haystack[start..start + pat.size()];
+        if mat.start() > offset && (mat.start() - offset + pat.size()) < haystack.len() {
+            let start = mat.start() - offset;
+            let slice = &haystack[start..start + pat.size()];
 
-        if pat.does_match(slice) {
-            let mat = Match {
-                pattern: mat.pattern(),
-                rva: start as u64,
-            };
-            matches.push(mat);
+            if pat.does_match(slice) {
+                let mat = Match {
+                    pattern: mat.pattern(),
+                    rva: start as u64,
+                };
+                matches.push(mat);
+            }
+        }
+    }
+    matches
+}
+
+pub fn multi_search_syms<'a, I>(patterns: I, haystack: &[u8], syms: &Vec<FunctionSymbol>) -> Vec<Match>
+where
+    I: IntoIterator<Item = &'a Pattern>,
+{
+    let mut items = vec![];
+    let mut sequences: Vec<Vec<u8>> = vec![];
+
+    for pat in patterns {
+        // if !pat.parts.iter().filter(|x| match x {
+        //     PatItem::Group(_, VarType::Ref) => true,
+        //     _ => false
+        // }).collect::<Vec<&PatItem>>().is_empty() {
+            let seq = pat.longest_byte_sequence_ref(syms);
+            let start = offset_from(pat.parts(), seq);
+            let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
+            items.push((pat, offset));
+            sequences.push(seq.iter().flat_map(|x| {
+                let bytes = x.to_bytes_ref(syms);
+                if bytes.is_empty() {
+                    None
+                } else {
+                    Some(bytes.as_slice().to_owned())
+                }
+            }).flatten().collect());
+        // }
+    }
+
+    let ac = AhoCorasick::new(&sequences);
+    let mut matches = vec![];
+
+    for mat in ac.find_overlapping_iter(haystack) {
+        let (pat, offset) = items[mat.pattern()];
+        if mat.start() > offset && (mat.start() - offset + pat.size()) < haystack.len() {
+            let start = mat.start() - offset;
+            let slice = &haystack[start..start + pat.size()];
+
+            if pat.does_match_ref(slice, syms) {
+                let mat = Match {
+                    pattern: mat.pattern(),
+                    rva: start as u64,
+                };
+                matches.push(mat);
+            }
         }
     }
     matches
