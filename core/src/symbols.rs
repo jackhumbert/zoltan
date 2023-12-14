@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use ustr::Ustr;
+use serde_json::Value;
 
 use crate::error::{Result, SymbolError};
 use crate::eval::EvalContext;
 use crate::exe::ExecutableData;
-use crate::patterns;
+use crate::patterns::{self, VarType};
 use crate::spec::FunctionSpec;
 use crate::types::{FunctionType, Type};
 
@@ -28,10 +29,31 @@ pub fn resolve_in_exe(
             .or_default()
             .push(mat.rva + exe.rdata_offset_from_base());
     }
+    for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.data()) {
+        match_map
+            .entry(mat.pattern)
+            .or_default()
+            .push(mat.rva + exe.data_offset_from_base());
+    }
 
     let mut syms = vec![];
     let mut notf = vec![];
     let mut errs = vec![];
+
+    // load addresses from .json
+    let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_addresses.json").unwrap();
+    let list: Value = serde_json::from_str(&file).unwrap();
+    for value in list.as_array().unwrap() {
+        syms.push(FunctionSymbol::new(
+            value["symbol"].as_str().unwrap().into(), 
+            value["symbol"].as_str().unwrap().into(), 
+            Type::Void, 
+            u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000, 
+            None, 
+            false
+        ));
+    }
+
     for (i, fun) in specs.iter().enumerate() {
         match match_map.get(&i).map(|vec| &vec[..]) {
             Some([addr]) => syms.push(resolve_symbol(fun, exe, *addr)?),
@@ -60,6 +82,24 @@ pub fn resolve_in_exe(
                 let symbol = resolve_symbol(fun, exe, *addr)?;
                 if !syms.contains(&symbol) {
                     syms.push(symbol);
+                }
+                for part in fun.pattern.groups() {
+                    match part {
+                        (name, VarType::Call, offset) => {
+                            if name != "" {
+                                let rva = exe.resolve_call_rdata(exe.rel_offset(*addr + offset as u64))? - exe.image_base();
+                                syms.push(FunctionSymbol::new(
+                                    format!("{}_{}", fun.name, name).into(),
+                                    format!("{}_{}", fun.full_name, name).into(),
+                                    fun.spec_type.clone(),
+                                    rva,
+                                    fun.file_name,
+                                    false,
+                                ))
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             },
             Some(addrs) => {

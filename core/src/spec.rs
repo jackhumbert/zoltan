@@ -106,7 +106,6 @@ impl FunctionSpec {
 }
 
 fn parse_typedef_comment(line: &str) -> Option<(&str, &str)> {
-    // log::info!("Comment: {line}");
     let (key, val) = line
         .strip_prefix('@')?
         .split_once(' ')?;

@@ -4,12 +4,15 @@ use crate::error::{Error, Result};
 
 const TEXT_SECTION: &str = ".text";
 const RDATA_SECTION: &str = ".rdata";
+const DATA_SECTION: &str = ".data";
 
 pub struct ExecutableData<'a> {
     text: &'a [u8],
     rdata: &'a [u8],
+    data: &'a [u8],
     image_base: u64,
     rdata_offset: u64,
+    data_offset: u64,
     text_offset: u64,
 }
 
@@ -21,12 +24,19 @@ impl<'a> ExecutableData<'a> {
         let rdata = exe
             .section_by_name(RDATA_SECTION)
             .ok_or(Error::MissingSection("rdata"))?;
+        let data = exe
+            .section_by_name(DATA_SECTION)
+            .ok_or(Error::MissingSection("data"))?;
+
+        // could also use pdata for function addr lookups
 
         let res = Self {
             text: text.data()?,
             rdata: rdata.data()?,
+            data: data.data()?,
             image_base: exe.relative_address_base(),
             rdata_offset: rdata.address(),
+            data_offset: data.address(),
             text_offset: text.address(),
         };
         Ok(res)
@@ -57,14 +67,16 @@ impl<'a> ExecutableData<'a> {
     }
 
     pub fn resolve_call_rdata(&self, addr: u64) -> Result<u64> {
-        let addr = addr as usize - self.rdata_offset as usize;
+        let addr = addr as usize;
         let bytes = self
             .rdata
             .get(addr..addr + std::mem::size_of::<u64>())
             .ok_or(Error::InvalidAccess(addr))?
             .try_into()
-            .unwrap();
-        Ok(u64::from_ne_bytes(bytes) - 0x0140000000)
+            .map_err(|_| Error::CompileError("Try Into Error".to_owned()))?;
+        let rel = u64::from_ne_bytes(bytes);
+        let abs = self.image_base as i64 + rel as i64 - 0x140000000;
+        Ok(abs as u64)
     }
 
     pub fn text(&'a self) -> &'a [u8] {
@@ -73,6 +85,10 @@ impl<'a> ExecutableData<'a> {
 
     pub fn rdata(&'a self) -> &'a [u8] {
         self.rdata
+    }
+
+    pub fn data(&'a self) -> &'a [u8] {
+        self.data
     }
 
     pub fn text_offset(&'a self) -> u64 {
@@ -89,6 +105,10 @@ impl<'a> ExecutableData<'a> {
 
     pub fn rdata_offset_from_base(&'a self) -> u64 {
         self.rdata_offset - self.image_base
+    }
+
+    pub fn data_offset_from_base(&'a self) -> u64 {
+        self.data_offset - self.image_base
     }
 
     pub fn rel_offset(&'a self, rva: u64) -> u64 {

@@ -42,7 +42,6 @@ impl PatItem {
             PatItem::Group(_, VarType::Call) => vec![],
             PatItem::Group(name, VarType::Ref) => {
                 if let Some(sym) = syms.iter().find(|x| format_name_for_addr(x.full_name()) == *name) {
-                    // log::info!("Addr for ({name}:ref): {:X}", sym.rva() + 0x0140000000);
                     u64::to_ne_bytes(sym.rva() + 0x0140000000).into() 
                 } else {
                     vec![]
@@ -77,7 +76,6 @@ impl Pattern {
     }
 
     pub fn parse(str: &str) -> Result<Self, peg::error::ParseError<peg::str::LineCol>> {
-        // log::info!("Parsing: {str}");
         pattern::pattern(str)
     }
 
