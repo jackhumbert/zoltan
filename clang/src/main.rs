@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use clang::diagnostic::Severity;
-use clang::{Clang, Entity, EntityKind, EntityVisitResult, Index, TranslationUnit};
-use error::{Error, Result};
+
+use clang::{Clang, EntityKind, EntityVisitResult, Index};
+use error::{Result};
 use flexi_logger::{LogSpecification, Logger};
 use rayon::prelude::*;
 use glob::glob;
@@ -13,7 +13,7 @@ use zoltan::spec::FunctionSpec;
 use zoltan::types::{FunctionEnum, Type};
 use zoltan::ustr::Ustr;
 
-use crate::red::RedName;
+
 use crate::resolver::TypeResolver;
 
 mod error;

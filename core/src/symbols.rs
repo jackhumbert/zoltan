@@ -55,8 +55,8 @@ pub fn resolve_in_exe(
         ));
     }
 
-    // load common nullsubs
-    let null_pattern: Vec<Vec<u8>> = vec![vec![ 0xC2, 0x00, 0x00, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC ]];
+    // load common nullsubs (includes the end of some functions because of the short CC)
+    let null_pattern: Vec<Vec<u8>> = vec![vec![0xC2, 0x00, 0x00, 0xCC]];
     let nulls: Vec<u64> = patterns::single_search(null_pattern, exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect();
 
     for (i, fun) in specs.iter().enumerate() {

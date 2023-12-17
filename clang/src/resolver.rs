@@ -315,7 +315,7 @@ impl TypeResolver {
         let mut base_entity = None;
         let mut vft_base = 0;
         let mut vft_index = 0;
-        let mut nice_name: Option<Ustr> = None;
+        let nice_name: Option<Ustr> = None;
 
         for child in children {
             match child.get_kind() {
@@ -381,7 +381,7 @@ impl TypeResolver {
                     let is_constructor = child.get_kind() == clang::EntityKind::Constructor;
                     let is_destructor = child.get_kind() == clang::EntityKind::Destructor;
                     // let is_parent_file = entity.get_kind() == clang::EntityKind::TranslationUnit;
-                    if let Some(parent_name) = (self.get_parent_name(entity)) {
+                    if let Some(parent_name) = self.get_parent_name(entity) {
                         if is_constructor {
                             full_name = parent_name.into();
                         } else if is_destructor {
