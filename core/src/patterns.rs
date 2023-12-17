@@ -20,6 +20,7 @@ impl PatItem {
             PatItem::Group(_, VarType::Call) => 8,
             PatItem::Group(_, VarType::Ref) => 8,
             PatItem::Group(_, VarType::PureCall) => 8,
+            PatItem::Group(_, VarType::Null) => 8,
         }
     }
 
@@ -30,6 +31,7 @@ impl PatItem {
             PatItem::Group(_, VarType::Rel) => vec![],
             PatItem::Group(_, VarType::Call) => vec![],
             PatItem::Group(_, VarType::Ref) => vec![],
+            PatItem::Group(_, VarType::Null) => vec![],
             PatItem::Group(_, VarType::PureCall) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
         }
     }
@@ -47,6 +49,7 @@ impl PatItem {
                     vec![]
                 }
             },
+            PatItem::Group(name, VarType::Null) => vec![],
             PatItem::Group(_, VarType::PureCall) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
         }
     }
@@ -57,7 +60,8 @@ pub enum VarType {
     Rel,
     Call,
     PureCall,
-    Ref
+    Ref,
+    Null
 }
 
 #[derive(Debug)]
@@ -111,7 +115,7 @@ impl Pattern {
                 }
                 PatItem::Group(_, var_type) => {
                     match var_type {
-                        VarType::Rel | VarType::Call => if bytes.advance_by(pat.size()).is_err() {
+                        VarType::Rel | VarType::Call | VarType::Null => if bytes.advance_by(pat.size()).is_err() {
                             return false;
                         },
                         VarType::Ref => return false,
@@ -133,7 +137,7 @@ impl Pattern {
         true
     }
 
-    fn does_match_ref(&self, bytes: &[u8], syms: &Vec<FunctionSymbol>) -> bool {
+    fn does_match_ref(&self, bytes: &[u8], syms: &Vec<FunctionSymbol>, nulls: &Vec<u64>) -> bool {
         let mut bytes = bytes.iter();
         for pat in self.parts() {
             match pat {
@@ -166,6 +170,17 @@ impl Pattern {
                             } else {
                                 return false;
                             }
+                        },
+                        VarType::Null => {
+                            let mut addr: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+                            for i in 0..pat.size() {
+                                if let Some(b) = bytes.next() {
+                                    addr[i] = b.to_owned();
+                                } else {
+                                    return false;
+                                }
+                            }
+                            return nulls.iter().find(|x| **x == u64::from_ne_bytes(addr) - 0x0140000000).is_some()
                         }
                     }
                 }
@@ -208,6 +223,7 @@ peg::parser! {
             / "purecall" { VarType::PureCall }
             / "pure" { VarType::PureCall }
             / "ref" { VarType::Ref }
+            / "null" { VarType::Null }
         rule item() -> PatItem
             = n:byte() { PatItem::Byte(n) }
             / any() { PatItem::Any }
@@ -215,6 +231,16 @@ peg::parser! {
         pub rule pattern() -> Pattern
             = items:item() ** _ { Pattern::new(items) }
     }
+}
+
+pub fn single_search(sequences: Vec<Vec<u8>>, haystack: &[u8]) -> Vec<u64> {
+    let ac = AhoCorasick::new(&sequences);
+    let mut matches = vec![];
+
+    for mat in ac.find_overlapping_iter(haystack) {
+        matches.push(mat.start() as u64);
+    }
+    matches
 }
 
 pub fn multi_search<'a, I>(patterns: I, haystack: &[u8]) -> Vec<Match>
@@ -261,7 +287,7 @@ where
     matches
 }
 
-pub fn multi_search_syms<'a, I>(patterns: I, haystack: &[u8], syms: &Vec<FunctionSymbol>) -> Vec<Match>
+pub fn multi_search_syms<'a, I>(patterns: I, haystack: &[u8], syms: &Vec<FunctionSymbol>, nulls: &Vec<u64>) -> Vec<Match>
 where
     I: IntoIterator<Item = &'a Pattern>,
 {
@@ -297,7 +323,7 @@ where
             let start = mat.start() - offset;
             let slice = &haystack[start..start + pat.size()];
 
-            if pat.does_match_ref(slice, syms) {
+            if pat.does_match_ref(slice, syms, nulls) {
                 let mat = Match {
                     pattern: mat.pattern(),
                     rva: start as u64,

@@ -90,6 +90,7 @@ pub fn write_c_header<W: Write>(
     symbols: &[FunctionSymbol],
     errors: &[SymbolError],
     safe: bool,
+    no_errors: bool,
 ) -> Result<Vec<SymbolEntry>, Box<dyn std::error::Error>> {
     writeln!(output, "{}", HEADER)?;
     let mut all_symbols: Vec<SymbolEntry> = vec![];
@@ -152,16 +153,18 @@ pub fn write_c_header<W: Write>(
                 writeln!(output, "#define {addr_name}_Addr 0x{:X}", symbol.rva())?;
             }
             SymbolEntry::NotFound(error) => {
-                let addr_name = error.addr_name();
-                writeln!(
-                    output,
-                    "{0: <119}\\\n{1: <119}\\\n{2}",
-                    format!("#define {addr_name}_Addr"),
-                    format!(
-                        r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#
-                    ),
-                    format!(r#"              "is 0 - Zoltan found {}\")")"#, error.error())
-                )?;
+                if !no_errors {
+                    let addr_name = error.addr_name();
+                    writeln!(
+                        output,
+                        "{0: <119}\\\n{1: <119}\\\n{2}",
+                        format!("#define {addr_name}_Addr"),
+                        format!(
+                            r#"    0 _Pragma("message(__FILE__ \"(\" __LINE_STR__ \") : Warning: {addr_name}_Addr""#
+                        ),
+                        format!(r#"              "is 0 - Zoltan found {}\")")"#, error.error())
+                    )?;
+                }
             }
         }
         if safe {
@@ -179,7 +182,7 @@ pub fn write_c_definition<W: Write>(
     safe: bool,
 ) -> Result<()> {
     writeln!(output, "#pragma once")?;
-    let header_objects = write_c_header(output.by_ref(), symbols, errors, safe)?;
+    let header_objects = write_c_header(output.by_ref(), symbols, errors, true, true)?;
     writeln!(output, "\n#include <RED4ext/RED4ext.hpp>")?;
     writeln!(output, "#include <RED4ext/Relocation.hpp>")?;
     let mut sorted: Vec<FunctionSymbol> = vec![];

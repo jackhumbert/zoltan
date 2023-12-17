@@ -29,6 +29,7 @@ pub fn resolve_in_exe(
             .or_default()
             .push(mat.rva + exe.rdata_offset_from_base());
     }
+    // look through data too
     for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.data()) {
         match_map
             .entry(mat.pattern)
@@ -54,6 +55,10 @@ pub fn resolve_in_exe(
         ));
     }
 
+    // load common nullsubs
+    let null_pattern: Vec<Vec<u8>> = vec![vec![ 0xC2, 0x00, 0x00, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC ]];
+    let nulls: Vec<u64> = patterns::single_search(null_pattern, exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect();
+
     for (i, fun) in specs.iter().enumerate() {
         match match_map.get(&i).map(|vec| &vec[..]) {
             Some([addr]) => syms.push(resolve_symbol(fun, exe, *addr)?),
@@ -70,7 +75,7 @@ pub fn resolve_in_exe(
             None => { }
         }
     }    
-    for mat in patterns::multi_search_syms(specs.iter().map(|spec| &spec.pattern), exe.rdata(), &syms) {
+    for mat in patterns::multi_search_syms(specs.iter().map(|spec| &spec.pattern), exe.rdata(), &syms, &nulls) {
         match_map
             .entry(mat.pattern)
             .or_default()

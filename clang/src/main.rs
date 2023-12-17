@@ -180,7 +180,9 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                         // }
                         EntityVisitResult::Recurse
                     }
-                    _ => EntityVisitResult::Continue,
+                    _ => {
+                        EntityVisitResult::Continue
+                    },
                 }
             } else {
                 EntityVisitResult::Continue
@@ -230,7 +232,7 @@ fn run<'a>(opts: &Opts) -> Result<()> {
     for ent in vars {
         if let Some(comment) = ent.get_comment() {
             match resolver.resolve_type(ent.get_type().unwrap()).ok() {
-                Some(Type::Constant(_)) | Some(Type::Long(_)) => {
+                Some(Type::Constant(_)) | Some(Type::Long(_)) | Some(Type::Pointer(_)) => {
                     let name: Ustr = ent.get_name_raw().unwrap().as_str().into();
                     let mut full_name = name.clone();
                     let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();

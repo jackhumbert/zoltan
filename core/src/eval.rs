@@ -42,6 +42,7 @@ impl<'a> EvalContext<'a> {
             let abs = match typ {
                 VarType::Rel => data.resolve_rel_text(offset as u64 + rva)?,
                 VarType::Call => data.resolve_call_rdata(offset as u64 + rva)?,
+                VarType::Null => data.resolve_call_rdata(offset as u64 + rva)?,
                 VarType::PureCall => rva + data.image_base(),
                 VarType::Ref => rva + data.image_base(),
             };

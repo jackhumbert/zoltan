@@ -55,7 +55,7 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     }
 
     if let Some(path) = &opts.c_output_path {
-        codegen::write_c_header(File::create(path)?, &syms, &errors, opts.safe_addr)?;
+        codegen::write_c_header(File::create(path)?, &syms, &errors, opts.safe_addr, false)?;
     }
     if let Some(path) = &opts.r4e_output_path {
         codegen::write_c_definition(File::create(path)?, &syms, &errors, opts.safe_addr)?;

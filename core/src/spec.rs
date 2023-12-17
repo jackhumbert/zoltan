@@ -37,12 +37,19 @@ impl FunctionSpec {
         let mut params = HashMap::new();
         let mut stripped_comments = vec![];
         for comment in comments {
-            let stripped = comment
+            let mut stripped = comment
                 .trim_start()
                 .strip_prefix("///")
                 .or_else(|| comment.trim_start().strip_prefix("*"))?
                 .trim_start()
                 .to_string();
+            if stripped.contains("//") {
+                stripped = stripped.split("//")
+                    .collect::<Vec<&str>>()
+                    .first()
+                    .unwrap()
+                    .to_string();
+            }
             if stripped.starts_with("@") {
                 stripped_comments.push(stripped);
             } else {

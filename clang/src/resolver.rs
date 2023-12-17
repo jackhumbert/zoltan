@@ -114,9 +114,9 @@ impl TypeResolver {
                             }
                             ent = Some(strt);
                         }
-                    } else {
-                        ent = Some(self.resolve_struct(name, entity, size).unwrap());
-                    };
+                    };// else {
+                        // ent = Some(self.resolve_struct(name, entity, size).unwrap());
+                    // };
                     if ent.is_some() {
                         self.structs.insert(name.into(), ent.unwrap());
                     }
