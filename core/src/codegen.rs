@@ -179,7 +179,7 @@ pub fn write_c_definition<W: Write>(
     mut output: W,
     symbols: &[FunctionSymbol],
     errors: &[SymbolError],
-    safe: bool,
+    _safe: bool,
 ) -> Result<()> {
     writeln!(output, "#pragma once")?;
     let header_objects = write_c_header(output.by_ref(), symbols, errors, true, true)?;

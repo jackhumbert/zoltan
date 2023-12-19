@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Deref;
-use std::rc::Rc;
 use std::str::FromStr;
 
 use ustr::Ustr;
@@ -8,7 +6,7 @@ use ustr::Ustr;
 use crate::error::{Error, ParamError, Result};
 use crate::eval::Expr;
 use crate::patterns::Pattern;
-use crate::types::{FunctionType, Type};
+use crate::types::Type;
 
 #[derive(Debug)]
 pub struct FunctionSpec {
@@ -55,7 +53,7 @@ impl FunctionSpec {
             } else {
                 if let Some(last) = stripped_comments.last_mut() {
                     last.push(' ');
-                    last.push_str(stripped.as_str());
+                    last.push_str(stripped.trim());
                 }
             }
         }
@@ -93,10 +91,10 @@ impl FunctionSpec {
             .map_err(|err| ParamError::ParseError("eval", err))?;
         let needs_impl = params.remove("noimpl").is_none();
         let nth_entry_of = params.remove("nth").map(parse_index_specifier).transpose()?;
-        for key in params.keys() {
+        // for key in params.keys() {
             // log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
             // return Err(ParamError::UnknownParam(str.deref().to_owned()));
-        }
+        // }
 
         Ok(Self {
             name,
@@ -150,6 +148,7 @@ fn parse_offset_from_str(str: &str, field: &'static str) -> Result<i64, ParamErr
 #[cfg(test)]
 mod tests {
     use std::assert_matches::assert_matches;
+    use crate::types::FunctionType;
 
     use super::*;
     use crate::eval::Expr;

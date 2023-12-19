@@ -31,9 +31,9 @@ pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts
     let data = ExecutableData::new(&exe)?;
 
     log::info!("Searching for symbols...");
-    let (syms, errors, notf) = symbols::resolve_in_exe(specs, &data)?;
+    let (syms, errors, _) = symbols::resolve_in_exe(specs, &data)?;
     log::info!("Found {} symbol(s)", syms.len());
-    let error_message = if !errors.is_empty() {
+    let _ = if !errors.is_empty() {
         let message = errors
             .iter()
             .map(|err| err.to_string())

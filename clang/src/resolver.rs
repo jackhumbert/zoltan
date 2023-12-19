@@ -276,6 +276,7 @@ impl TypeResolver {
             other => return Err(Error::UnexpectedType(other)),
         };
 
+        // not sure if this handles const functions correctly with `this` in param list
         if typ.is_const_qualified() {
             res = Type::Constant(res.into());
         }
@@ -596,6 +597,7 @@ impl TypeResolver {
         for typ in typ.get_argument_types().unwrap() {
             params.push(self.resolve_type(typ)?);
         }
+
         Ok(FunctionType {
             return_type,
             params,

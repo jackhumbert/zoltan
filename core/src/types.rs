@@ -5,7 +5,7 @@ use std::hash::BuildHasherDefault;
 use std::rc::Rc;
 
 use auto_enums::auto_enum;
-use derive_more::{AsRef, Display, From};
+use derive_more::{AsRef, From};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use ustr::{IdentityHasher, Ustr};
@@ -134,10 +134,7 @@ impl Type {
             Type::Array(inner) => inner.name_left(),
             Type::FixedArray(inner, _) => inner.name_left(),
             Type::Function(fun) => fun.return_type.name(),
-            Type::Constant(inner) if matches!(inner.as_ref(), Type::Function(_)) => {
-                format!("const {}", inner.name_left()).into()
-            }
-            Type::Constant(inner) => format!("const {}", inner.name_left()).into(),
+            Type::Constant(inner) => format!("const {}", inner.name_left()).into()
             // Type::VirtualFunction(fun) => fun.return_type.name(),
             // Type::StaticFunction(fun) => fun.return_type.name(),
         }

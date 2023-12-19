@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::rc::Rc;
+// use std::rc::Rc;
 
 use ustr::Ustr;
 use serde_json::Value;
@@ -7,14 +7,25 @@ use serde_json::Value;
 use crate::error::{Result, SymbolError};
 use crate::eval::EvalContext;
 use crate::exe::ExecutableData;
-use crate::patterns::{self, VarType};
+use crate::patterns;
 use crate::spec::FunctionSpec;
-use crate::types::{FunctionType, Type};
+use crate::types::Type;
 
 pub fn resolve_in_exe(
     specs: Vec<FunctionSpec>,
     exe: &ExecutableData,
 ) -> Result<(Vec<FunctionSymbol>, Vec<SymbolError>, Vec<FunctionSymbol>)> {
+    let mut strings = vec![];
+    for spec in specs.iter() {
+        for pat in spec.pattern.parts() {
+            match pat {
+                patterns::PatItem::ByteCode(patterns::ByteCode::Lea(patterns::LeaType::Str(string))) => {
+                    strings.push(string.to_owned());
+                },
+                _ => {}
+            }
+        }
+    }
     let mut match_map: HashMap<usize, Vec<u64>> = HashMap::new();
     for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.text()) {
         match_map
@@ -41,10 +52,13 @@ pub fn resolve_in_exe(
     let mut notf = vec![];
     let mut errs = vec![];
 
+    let mut refs: HashMap<String, Vec<u64>> = HashMap::new();
+
     // load addresses from .json
     let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_addresses.json").unwrap();
     let list: Value = serde_json::from_str(&file).unwrap();
     for value in list.as_array().unwrap() {
+        refs.insert(value["symbol"].as_str().unwrap().into(), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000]);
         syms.push(FunctionSymbol::new(
             value["symbol"].as_str().unwrap().into(), 
             value["symbol"].as_str().unwrap().into(), 
@@ -54,10 +68,39 @@ pub fn resolve_in_exe(
             false
         ));
     }
-
+    // load classes & vfts from .json (from vft ripper)
+    let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_classes.json").unwrap();
+    let list: Value = serde_json::from_str(&file).unwrap();
+    for value in list.as_array().unwrap() {
+        refs.insert(value["symbol"].as_str().unwrap().into(), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap()]);
+        syms.push(FunctionSymbol::new(
+            value["symbol"].as_str().unwrap().into(), 
+            value["symbol"].as_str().unwrap().into(), 
+            Type::Void, 
+            u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap(), 
+            None, 
+            false
+        ));
+    }
+    // find strings used in byteCodes
+    for string in strings {
+        let mut v: Vec<u8> = string.as_bytes().into();
+        v.push(0);
+        let addrs: Vec<u64> = patterns::single_search(vec![v], exe.rdata()).iter().map(|x| x + exe.rdata_offset_from_base()).collect();
+        refs.insert(string.to_owned(), addrs.clone());
+        for addr in addrs {
+            log::info!("{}: 0x{:X}", string, addr);
+        }
+    }
     // load common nullsubs (includes the end of some functions because of the short CC)
-    let null_pattern: Vec<Vec<u8>> = vec![vec![0xC2, 0x00, 0x00, 0xCC]];
-    let nulls: Vec<u64> = patterns::single_search(null_pattern, exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect();
+    refs.insert("null".to_owned(), patterns::single_search(vec![
+            vec![0xC2, 0x00, 0x00, 0xCC]
+        ], exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect());
+    refs.insert("ret0".to_owned(), patterns::single_search(vec![
+            vec![0x32, 0xC0, 0xC3, 0xCC],
+            vec![0x33, 0xC0, 0xC3, 0xCC],
+            vec![0xC2, 0x00, 0x00, 0xCC],
+        ], exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect());
 
     for (i, fun) in specs.iter().enumerate() {
         match match_map.get(&i).map(|vec| &vec[..]) {
@@ -75,7 +118,13 @@ pub fn resolve_in_exe(
             None => { }
         }
     }    
-    for mat in patterns::multi_search_syms(specs.iter().map(|spec| &spec.pattern), exe.rdata(), &syms, &nulls) {
+    for mat in patterns::multi_search_ref(specs.iter().map(|spec| &spec.pattern), exe.text(), exe.text_offset_from_base(), &refs) {
+        match_map
+            .entry(mat.pattern)
+            .or_default()
+            .push(mat.rva + exe.text_offset_from_base());
+    }    
+    for mat in patterns::multi_search_ref(specs.iter().map(|spec| &spec.pattern), exe.rdata(), exe.rdata_offset_from_base(), &refs) {
         match_map
             .entry(mat.pattern)
             .or_default()
@@ -88,24 +137,24 @@ pub fn resolve_in_exe(
                 if !syms.contains(&symbol) {
                     syms.push(symbol);
                 }
-                for part in fun.pattern.groups() {
-                    match part {
-                        (name, VarType::Call, offset) => {
-                            if name != "" {
-                                let rva = exe.resolve_call_rdata(exe.rel_offset(*addr + offset as u64))? - exe.image_base();
-                                syms.push(FunctionSymbol::new(
-                                    format!("{}_{}", fun.name, name).into(),
-                                    format!("{}_{}", fun.full_name, name).into(),
-                                    fun.spec_type.clone(),
-                                    rva,
-                                    fun.file_name,
-                                    false,
-                                ))
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                // for part in fun.pattern.groups() {
+                //     match part {
+                //         (name, VarType::Rel, offset) => {
+                //             if name != "" {
+                //                 let rva = exe.resolve_call_rdata(exe.rel_offset(*addr + offset as u64))? - exe.image_base();
+                //                 syms.push(FunctionSymbol::new(
+                //                     format!("{}_{}", fun.name, name).into(),
+                //                     format!("{}_{}", fun.full_name, name).into(),
+                //                     fun.spec_type.clone(),
+                //                     rva,
+                //                     fun.file_name,
+                //                     false,
+                //                 ))
+                //             }
+                //         }
+                //         _ => {}
+                //     }
+                // }
             },
             Some(addrs) => {
                 if let Some((n, max)) = fun.nth_entry_of {
@@ -187,9 +236,9 @@ impl FunctionSymbol {
         }
     }
 
-    fn eq(&self, other: &FunctionSymbol) -> bool {
-        self.full_name == other.full_name
-    }
+    // fn eq(&self, other: &FunctionSymbol) -> bool {
+    //     self.full_name == other.full_name
+    // }
 
     pub fn func_name(&self) -> &str {
         let v: Vec<&str> = self.full_name.split("::").collect();

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use aho_corasick::AhoCorasick;
 use enum_as_inner::EnumAsInner;
 
@@ -8,6 +10,7 @@ pub enum PatItem {
     Byte(u8),
     Any,
     Group(String, VarType),
+    ByteCode(ByteCode)
 }
 
 impl PatItem {
@@ -17,10 +20,13 @@ impl PatItem {
             PatItem::Byte(_) => 1,
             PatItem::Any => 1,
             PatItem::Group(_, VarType::Rel) => 4,
-            PatItem::Group(_, VarType::Call) => 8,
-            PatItem::Group(_, VarType::Ref) => 8,
-            PatItem::Group(_, VarType::PureCall) => 8,
-            PatItem::Group(_, VarType::Null) => 8,
+            PatItem::ByteCode(ByteCode::Vft(_)) => 8,
+            PatItem::ByteCode(ByteCode::Lea(_)) => 7,
+            PatItem::ByteCode(ByteCode::Mov(MovType::U8(_))) => 2,
+            PatItem::ByteCode(ByteCode::Mov(MovType::U32(_))) => 5,
+            PatItem::ByteCode(ByteCode::Mov(MovType::Ref(_))) => 7,
+            PatItem::ByteCode(ByteCode::Call(_)) => 5,
+            PatItem::ByteCode(ByteCode::Retn) => 1,
         }
     }
 
@@ -29,28 +35,248 @@ impl PatItem {
             PatItem::Byte(b) => vec![*b],
             PatItem::Any => vec![],
             PatItem::Group(_, VarType::Rel) => vec![],
-            PatItem::Group(_, VarType::Call) => vec![],
-            PatItem::Group(_, VarType::Ref) => vec![],
-            PatItem::Group(_, VarType::Null) => vec![],
-            PatItem::Group(_, VarType::PureCall) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
+            PatItem::ByteCode(ByteCode::Vft(VftType::PureCall)) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
+            PatItem::ByteCode(ByteCode::Vft(_)) => vec![],
+            PatItem::ByteCode(ByteCode::Lea(_)) => vec![],
+            PatItem::ByteCode(ByteCode::Mov(MovType::U8(b))) => vec![0xB0, *b],
+            PatItem::ByteCode(ByteCode::Mov(MovType::U32(b))) => {
+                let mut v = u32::to_ne_bytes(*b).to_vec();
+                v.insert(0, 0xB8);
+                v
+            },
+            PatItem::ByteCode(ByteCode::Mov(MovType::Ref(_))) => vec![],
+            PatItem::ByteCode(ByteCode::Call(_)) => vec![],
+            PatItem::ByteCode(ByteCode::Retn) => vec![0xC3],
         }
     }
 
-    pub fn to_bytes_ref(&self, syms: &Vec<FunctionSymbol>) -> Vec<u8> {
+    pub fn to_bytes_ref(&self, refs: &HashMap<String, Vec<u64>>) -> Vec<u8> {
         match self {
-            PatItem::Byte(b) => vec![*b],
-            PatItem::Any => vec![],
-            PatItem::Group(_, VarType::Rel) => vec![],
-            PatItem::Group(_, VarType::Call) => vec![],
-            PatItem::Group(name, VarType::Ref) => {
-                if let Some(sym) = syms.iter().find(|x| format_name_for_addr(x.full_name()) == *name) {
-                    u64::to_ne_bytes(sym.rva() + 0x0140000000).into() 
+            PatItem::ByteCode(ByteCode::Vft(VftType::Ref(name))) => {
+                if let Some([addr]) = refs.get(name).map(|vec| &vec[..]) {
+                    u64::to_ne_bytes(addr + 0x0140000000).into() 
                 } else {
                     vec![]
                 }
             },
-            PatItem::Group(name, VarType::Null) => vec![],
-            PatItem::Group(_, VarType::PureCall) => vec![0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00],
+            _ => self.to_bytes(),
+        }
+    }
+    
+    pub fn does_match(&self, bytes: &mut std::iter::Enumerate<std::slice::Iter<'_, u8>>, start: u64) -> bool {
+        match self {
+            PatItem::Byte(expected) => {
+                match bytes.next() {
+                    Some((_, &byte)) => {
+                        if byte != *expected {
+                            return false;
+                        }
+                     },
+                    _ => { return false; }
+                }
+            }
+            PatItem::Group(_, var_type) => {
+                match var_type {
+                    VarType::Rel => if bytes.advance_by(self.size()).is_err() {
+                        return false;
+                    },
+                }
+            },
+            PatItem::ByteCode(ByteCode::Vft(VftType::PureCall)) => {
+                let comp_bytes: [u8; 8] = [0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00];
+                for comp_byte in comp_bytes {
+                    match bytes.next() {
+                        Some((_, &byte)) => {
+                            if byte != comp_byte {
+                                return false;
+                            }
+                         },
+                        _ => { return false; }
+                    }
+                }
+            },
+            PatItem::ByteCode(ByteCode::Retn) => { return matches!(bytes.next(), Some((_, 0xC3))) },
+            _ => if bytes.advance_by(self.size()).is_err() {
+                return false;
+            },
+        }
+        true
+    }
+
+    pub fn does_match_ref(&self, bytes: &mut std::iter::Enumerate<std::slice::Iter<'_, u8>>, start: u64, refs: &HashMap<String, Vec<u64>>) -> bool {
+        match self {
+            PatItem::ByteCode(ByteCode::Vft(VftType::Null)) => {
+                let mut addr: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+                for i in 0..self.size() {
+                    if let Some(b) = bytes.next() {
+                        addr[i] = b.1.to_owned();
+                    } else {
+                        return false;
+                    }
+                }
+                return refs
+                    .get("null")
+                    .unwrap()
+                    .iter()
+                    .find(|x| **x == u64::from_ne_bytes(addr) - 0x0140000000)
+                    .is_some()
+            },
+            PatItem::ByteCode(ByteCode::Vft(VftType::Return(value))) => {
+                let mut addr: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+                for i in 0..self.size() {
+                    if let Some(b) = bytes.next() {
+                        addr[i] = b.1.to_owned();
+                    } else {
+                        return false;
+                    }
+                }
+                return refs
+                    .get(format!("ret{}", value).as_str())
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .find(|x| **x == u64::from_ne_bytes(addr) - 0x0140000000)
+                    .is_some()
+            },
+            PatItem::ByteCode(ByteCode::Vft(VftType::Ref(name))) => {
+                if let Some(addrs) = refs.get(name) {
+                    let mut offset = 0;
+                    let mut addr_bytes = vec![];
+                    for _ in 0..4 {
+                        if let Some((o, &b)) = bytes.next() {
+                            addr_bytes.push(b);
+                            offset = o;
+                        }
+                    }
+                    let byte_addr = i32::from_ne_bytes(addr_bytes.try_into().unwrap());
+                    for addr in addrs {
+                        if ((start + 1 + offset as u64) as i64 + byte_addr as i64) as u64 == *addr  {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+            PatItem::ByteCode(ByteCode::Mov(MovType::Ref(name))) => {
+                if let Some(addrs) = refs.get(name) {
+                    let comp_bytes = vec![0x48, 0x8B, 0x05];
+                    let mut offset = 0;
+                    for comp_byte in comp_bytes {
+                        match bytes.next() {
+                            Some((_, &byte)) => {
+                                if byte != comp_byte {
+                                    return false;
+                                }
+                             },
+                            _ => { return false; }
+                        }
+                    }
+                    let mut addr_bytes = vec![];
+                    for _ in 0..4 {
+                        if let Some((o, &b)) = bytes.next() {
+                           addr_bytes.push(b);
+                           offset = o;
+                        }
+                    }
+                    let byte_addr = i32::from_ne_bytes(addr_bytes.try_into().unwrap());
+                    for addr in addrs {
+                        if ((start + 1 + offset as u64) as i64 + byte_addr as i64) as u64 == *addr  {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+            PatItem::ByteCode(ByteCode::Lea(LeaType::Ref(name))) => {
+                if let Some(addrs) = refs.get(name) {
+                    let comp_bytes = vec![0x48, 0x8D, 0x05];
+                    let mut offset = 0;
+                    for comp_byte in comp_bytes {
+                        match bytes.next() {
+                            Some((_, &byte)) => {
+                                if byte != comp_byte {
+                                    return false;
+                                }
+                             },
+                            _ => { return false; }
+                        }
+                    }
+                    let mut addr_bytes = vec![];
+                    for _ in 0..4 {
+                        if let Some((o, &b)) = bytes.next() {
+                           addr_bytes.push(b);
+                           offset = o;
+                        }
+                    }
+                    let byte_addr = i32::from_ne_bytes(addr_bytes.try_into().unwrap());
+                    for addr in addrs {
+                        if ((start + 1 + offset as u64) as i64 + byte_addr as i64) as u64 == *addr  {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+            PatItem::ByteCode(ByteCode::Lea(LeaType::Str(name))) => {
+                if let Some(addrs) = refs.get(name) {
+                    let comp_bytes = vec![0x48, 0x8D, 0x15];
+                    let mut offset = 0;
+                    for comp_byte in comp_bytes {
+                        match bytes.next() {
+                            Some((_, &byte)) => {
+                                if byte != comp_byte {
+                                    return false;
+                                }
+                             },
+                            _ => { return false; }
+                        }
+                    }
+                    let mut addr_bytes = vec![];
+                    for _ in 0..4 {
+                        if let Some((o, &b)) = bytes.next() {
+                           addr_bytes.push(b);
+                           offset = o;
+                        }
+                    }
+                    let byte_addr = i32::from_ne_bytes(addr_bytes.try_into().unwrap());
+                    for addr in addrs {
+                        if ((start + 1 + offset as u64) as i64 + byte_addr as i64) as u64 == *addr  {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+            PatItem::ByteCode(ByteCode::Call(name)) => {
+                if let Some(addrs) = refs.get(name) {
+                    let comp_bytes = vec![0xE8];
+                    let mut offset = 0;
+                    for comp_byte in comp_bytes {
+                        match bytes.next() {
+                            Some((_, &byte)) => {
+                                if byte != comp_byte {
+                                    return false;
+                                }
+                             },
+                            _ => { return false; }
+                        }
+                    }
+                    let mut addr_bytes = vec![];
+                    for _ in 0..4 {
+                        if let Some((o, &b)) = bytes.next() {
+                           addr_bytes.push(b);
+                           offset = o;
+                        }
+                    }
+                    let byte_addr = i32::from_ne_bytes(addr_bytes.try_into().unwrap());
+                    for addr in addrs {
+                        if ((start + 1 + offset as u64) as i64 + byte_addr as i64) as u64 == *addr  {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            },
+            _ => { return self.does_match(bytes, start); },
         }
     }
 }
@@ -58,10 +284,38 @@ impl PatItem {
 #[derive(Debug, Clone, Copy)]
 pub enum VarType {
     Rel,
-    Call,
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum VftType {
+    Any,
+    Bytes(Vec<u8>),
+    Ref(String),
     PureCall,
-    Ref,
-    Null
+    Null,
+    Return(u64),
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum LeaType {
+    Ref(String),
+    Str(String),
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum MovType {
+    U8(u8),
+    U32(u32),
+    Ref(String)
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum ByteCode {
+    Vft(VftType),
+    Lea(LeaType),
+    Mov(MovType),
+    Call(String),
+    Retn,
 }
 
 #[derive(Debug)]
@@ -84,7 +338,7 @@ impl Pattern {
     }
 
     #[inline]
-    fn parts(&self) -> &[PatItem] {
+    pub fn parts(&self) -> &[PatItem] {
         &self.parts
     }
 
@@ -104,89 +358,21 @@ impl Pattern {
             .filter_map(|(it, offset)| it.as_group().map(|(key, typ)| (key.as_str(), *typ, offset)))
     }
 
-    fn does_match(&self, bytes: &[u8]) -> bool {
-        let mut bytes = bytes.iter();
+    fn does_match(&self, bytes: &[u8], offset: u64) -> bool {
+        let mut bytes = bytes.iter().enumerate();
         for pat in self.parts() {
-            match pat {
-                PatItem::Byte(expected) => {
-                    if bytes.next() != Some(expected) {
-                        return false;
-                    }
-                }
-                PatItem::Group(_, var_type) => {
-                    match var_type {
-                        VarType::Rel | VarType::Call | VarType::Null => if bytes.advance_by(pat.size()).is_err() {
-                            return false;
-                        },
-                        VarType::Ref => return false,
-                        VarType::PureCall => {
-                            let pure_call_bytes: [u8; 8] = [0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00];
-                            for pure_call_byte in pure_call_bytes {
-                                if bytes.next() != Some(&pure_call_byte) {
-                                    return false
-                                }
-                            }
-                        }
-                    }
-                }
-                PatItem::Any => {
-                    bytes.next();
-                }
+            if !pat.does_match(&mut bytes, offset) {
+                return false
             }
         }
         true
     }
 
-    fn does_match_ref(&self, bytes: &[u8], syms: &Vec<FunctionSymbol>, nulls: &Vec<u64>) -> bool {
-        let mut bytes = bytes.iter();
+    fn does_match_ref(&self, bytes: &[u8], offset: u64, refs: &HashMap<String, Vec<u64>>) -> bool {
+        let mut bytes = bytes.iter().enumerate();
         for pat in self.parts() {
-            match pat {
-                PatItem::Byte(expected) => {
-                    if bytes.next() != Some(expected) {
-                        return false;
-                    }
-                }
-                PatItem::Group(name, var_type) => {
-                    match var_type {
-                        VarType::Rel | VarType::Call => if bytes.advance_by(pat.size()).is_err() {
-                            return false;
-                        },
-                        VarType::PureCall => {
-                            let pure_call_bytes: [u8; 8] = [0xC8, 0xA0, 0x7D, 0x41, 0x01, 0x00, 0x00, 0x00];
-                            for pure_call_byte in pure_call_bytes {
-                                if bytes.next() != Some(&pure_call_byte) {
-                                    return false
-                                }
-                            }
-                        },
-                        VarType::Ref => {
-                            if let Some(sym) = syms.iter().find(|x| format_name_for_addr(x.full_name()) == *name) {
-                                let pure_call_bytes: [u8; 8] = u64::to_ne_bytes(sym.rva() + 0x0140000000).into();
-                                for pure_call_byte in pure_call_bytes {
-                                    if bytes.next() != Some(&pure_call_byte) {
-                                        return false
-                                    }
-                                }
-                            } else {
-                                return false;
-                            }
-                        },
-                        VarType::Null => {
-                            let mut addr: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
-                            for i in 0..pat.size() {
-                                if let Some(b) = bytes.next() {
-                                    addr[i] = b.to_owned();
-                                } else {
-                                    return false;
-                                }
-                            }
-                            return nulls.iter().find(|x| **x == u64::from_ne_bytes(addr) - 0x0140000000).is_some()
-                        }
-                    }
-                }
-                PatItem::Any => {
-                    bytes.next();
-                }
+            if !pat.does_match_ref(&mut bytes, offset, refs) {
+                return false
             }
         }
         true
@@ -199,9 +385,9 @@ impl Pattern {
             .unwrap_or_default()
     }
 
-    fn longest_byte_sequence_ref(&self, syms: &Vec<FunctionSymbol>) -> &[PatItem] {
+    fn longest_byte_sequence_ref(&self, refs: &HashMap<String, Vec<u64>>) -> &[PatItem] {
         self.parts()
-            .group_by(|a, b| !a.to_bytes_ref(syms).is_empty() && !b.to_bytes_ref(syms).is_empty())
+            .group_by(|a, b| !a.to_bytes_ref(refs).is_empty() && !b.to_bytes_ref(refs).is_empty())
             .max_by_key(|parts| parts.len())
             .unwrap_or_default()
     }
@@ -219,15 +405,31 @@ peg::parser! {
             = id:$(['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { id.to_owned() }
         rule var_type() -> VarType
             = "rel" { VarType::Rel }
-            / "call" { VarType::Call }
-            / "purecall" { VarType::PureCall }
-            / "pure" { VarType::PureCall }
-            / "ref" { VarType::Ref }
-            / "null" { VarType::Null }
+        rule number() -> u64
+            = "0x" n:$(['0'..='9' | 'A'..='F']*) {? u64::from_str_radix(n, 16).or(Err("return number")) }
+            / n:$(['0'..='9']*) {? u64::from_str_radix(n, 10).or(Err("return number")) }
+        rule ret() -> u64
+            = "(" _ n:number() _ ")" { n }
+            / _ n:number() _ { n }
+        rule vft() -> VftType
+            = "pure" { VftType::PureCall }
+            / "null" { VftType::Null }
+            / "ret" _ ret:ret() { VftType::Return(ret) }
+            // / b:byte() ++ _ { VftType::Bytes(b) }
+            / id:ident() { VftType::Ref(id) }
+        rule byte_code() ->  ByteCode
+            = "vft(" _ v:vft() _ ")" { ByteCode::Vft(v) }
+            / "vft" { ByteCode::Vft(VftType::Any) }
+            / "lea(" _ id:ident() _ ")" { ByteCode::Lea(LeaType::Ref(id)) }
+            / "lea(\"" str:$([^'"']+) "\")" { ByteCode::Lea(LeaType::Str(str.to_owned())) }
+            / "mov(" _ id:ident() _ ")" { ByteCode::Mov(MovType::Ref(id)) }
+            / "call(" _ id:ident() _ ")" { ByteCode::Call(id) }
+            / "retn" { ByteCode::Retn }
         rule item() -> PatItem
             = n:byte() { PatItem::Byte(n) }
             / any() { PatItem::Any }
             / "(" _ id:ident() _ ":" _ typ:var_type() _ ")" { PatItem::Group(id, typ) }
+            / "/" byte_code:byte_code() { PatItem::ByteCode(byte_code) }
         pub rule pattern() -> Pattern
             = items:item() ** _ { Pattern::new(items) }
     }
@@ -251,19 +453,25 @@ where
     let mut sequences: Vec<Vec<u8>> = vec![];
 
     for pat in patterns {
-        let seq = pat.longest_byte_sequence();
-        let start = offset_from(pat.parts(), seq);
-        let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
-        items.push((pat, offset));
-        // sequences.push(seq.iter().filter_map(PatItem::as_byte).cloned().collect());
-        sequences.push(seq.iter().flat_map(|x| {
-            let bytes = x.to_bytes();
-            if bytes.is_empty() {
-                None
-            } else {
-                Some(bytes.as_slice().to_owned())
-            }
-        }).flatten().collect());
+        let has_byte_code = !pat.parts.iter().filter(|x| match x {
+            PatItem::ByteCode(_) => true,
+            _ => false
+        }).collect::<Vec<&PatItem>>().is_empty();
+        if !has_byte_code {
+            let seq = pat.longest_byte_sequence();
+            let start = offset_from(pat.parts(), seq);
+            let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
+            items.push((pat, offset));
+            // sequences.push(seq.iter().filter_map(PatItem::as_byte).cloned().collect());
+            sequences.push(seq.iter().flat_map(|x| {
+                let bytes = x.to_bytes();
+                if bytes.is_empty() {
+                    None
+                } else {
+                    Some(bytes.as_slice().to_owned())
+                }
+            }).flatten().collect());
+        }
     }
 
     let ac = AhoCorasick::new(&sequences);
@@ -275,7 +483,7 @@ where
             let start = mat.start() - offset;
             let slice = &haystack[start..start + pat.size()];
 
-            if pat.does_match(slice) {
+            if pat.does_match(slice, start as u64) {
                 let mat = Match {
                     pattern: mat.pattern(),
                     rva: start as u64,
@@ -287,7 +495,7 @@ where
     matches
 }
 
-pub fn multi_search_syms<'a, I>(patterns: I, haystack: &[u8], syms: &Vec<FunctionSymbol>, nulls: &Vec<u64>) -> Vec<Match>
+pub fn multi_search_ref<'a, I>(patterns: I, haystack: &[u8], segment_start: u64, refs: &HashMap<String, Vec<u64>>) -> Vec<Match>
 where
     I: IntoIterator<Item = &'a Pattern>,
 {
@@ -299,12 +507,12 @@ where
         //     PatItem::Group(_, VarType::Ref) => true,
         //     _ => false
         // }).collect::<Vec<&PatItem>>().is_empty() {
-            let seq = pat.longest_byte_sequence_ref(syms);
+            let seq = pat.longest_byte_sequence_ref(refs);
             let start = offset_from(pat.parts(), seq);
             let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
             items.push((pat, offset));
             sequences.push(seq.iter().flat_map(|x| {
-                let bytes = x.to_bytes_ref(syms);
+                let bytes = x.to_bytes_ref(refs);
                 if bytes.is_empty() {
                     None
                 } else {
@@ -323,7 +531,7 @@ where
             let start = mat.start() - offset;
             let slice = &haystack[start..start + pat.size()];
 
-            if pat.does_match_ref(slice, syms, nulls) {
+            if pat.does_match_ref(slice, segment_start + start as u64, refs) {
                 let mat = Match {
                     pattern: mat.pattern(),
                     rva: start as u64,
@@ -373,6 +581,23 @@ mod tests {
             PatItem::Any,
             PatItem::Any,
         ]);
+
+        let pat = Pattern::parse("/vft /vft(rttiIType_GetERTTITypeString) /vft(pure) /vft(null) /vft(ret 0)").unwrap();
+        assert_matches!(pat.parts(), &[
+            PatItem::ByteCode(ByteCode::Vft(VftType::Any)),
+            PatItem::ByteCode(ByteCode::Vft(VftType::Ref(_))),
+            PatItem::ByteCode(ByteCode::Vft(VftType::PureCall)),
+            PatItem::ByteCode(ByteCode::Vft(VftType::Null)),
+            PatItem::ByteCode(ByteCode::Vft(VftType::Return(0))),
+        ]);
+        if let Some(n) = pat.parts().get(1) {
+            assert!(match n {
+                PatItem::ByteCode(ByteCode::Vft(VftType::Ref(name))) => name == "rttiIType_GetERTTITypeString",
+                _ => false
+            });
+        } else {
+            assert!(false);
+        }
     }
 
     #[test]

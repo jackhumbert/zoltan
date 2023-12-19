@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 
 use clang::{Clang, EntityKind, EntityVisitResult, Index};
-use error::{Result};
+use error::Result;
 use flexi_logger::{LogSpecification, Logger};
-use rayon::prelude::*;
+// use rayon::prelude::*;
 use glob::glob;
 
 use zoltan::opts::Opts;

@@ -112,7 +112,9 @@ impl<'a> ExecutableData<'a> {
     }
 
     pub fn rel_offset(&'a self, rva: u64) -> u64 {
-        let offset = if rva > self.rdata_offset_from_base() {
+        let offset = if rva > self.data_offset_from_base() {
+            rva - self.data_offset_from_base()
+        } else if rva > self.rdata_offset_from_base() {
             rva - self.rdata_offset_from_base()
         } else if rva > self.text_offset_from_base() {
             rva - self.text_offset_from_base()

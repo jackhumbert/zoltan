@@ -47,14 +47,14 @@ impl SymbolError {
             Self::NoMatches(name) => name,
             Self::NotEnoughMatches(name, _) => name,
             Self::CountMismatch(name, _) => name,
-            _ => "",
+            // _ => "",
         };
         let other_name = match other {
             Self::MoreThanOneMatch(name, _) => name,
             Self::NoMatches(name) => name,
             Self::NotEnoughMatches(name, _) => name,
             Self::CountMismatch(name, _) => name,
-            _ => "",
+            // _ => "",
         };
         name == other_name
     }
@@ -64,7 +64,7 @@ impl SymbolError {
             Self::NoMatches(name) => *name,
             Self::NotEnoughMatches(name, _) => *name,
             Self::CountMismatch(name, _) => *name,
-            _ => "".into(),
+            // _ => "".into(),
         }
     }
 }
