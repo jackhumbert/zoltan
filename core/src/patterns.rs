@@ -74,7 +74,7 @@ impl PatItem {
                      },
                     _ => { return false; }
                 }
-            }
+            },
             PatItem::Group(_, var_type) => {
                 match var_type {
                     VarType::Rel => if bytes.advance_by(self.size()).is_err() {
@@ -471,6 +471,9 @@ where
                     Some(bytes.as_slice().to_owned())
                 }
             }).flatten().collect());
+        } else {
+            items.push((pat, 0));
+            sequences.push(vec![]);
         }
     }
 
