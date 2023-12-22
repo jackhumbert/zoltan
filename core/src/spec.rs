@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use strum_macros::EnumString;
 
 use ustr::Ustr;
 
@@ -8,8 +9,24 @@ use crate::eval::Expr;
 use crate::patterns::Pattern;
 use crate::types::Type;
 
+#[derive(Debug, Copy, Clone, EnumString, PartialEq)]
+pub enum SegmentType {
+    #[strum(serialize="any")]
+    Any,
+    #[strum(serialize="text")]
+    Text,
+    #[strum(serialize="idata")]
+    IData,
+    #[strum(serialize="rdata")]
+    RData,
+    #[strum(serialize="data")]
+    Data,
+    #[strum(serialize="pdata")]
+    PData,
+}
+
 #[derive(Debug)]
-pub struct FunctionSpec {
+pub struct SymbolSpec {
     pub name: Ustr,
     pub full_name: Ustr,
     pub spec_type: Type,
@@ -19,9 +36,11 @@ pub struct FunctionSpec {
     pub nth_entry_of: Option<(usize, usize)>,
     pub file_name: Option<Ustr>,
     pub needs_impl: bool,
+    pub segment: SegmentType,
+    pub addrs: Vec<u64>
 }
 
-impl FunctionSpec {
+impl SymbolSpec {
     pub fn new<'a, I>(
         name: Ustr,
         full_name: Ustr,
@@ -71,6 +90,12 @@ impl FunctionSpec {
         }
     }
 
+    pub fn add_addrs(&mut self, addrs: &Vec<u64>) {
+        for addr in addrs {
+            self.addrs.push(*addr);
+        }
+    }
+
     fn from_params(
         name: Ustr,
         full_name: Ustr,
@@ -91,10 +116,12 @@ impl FunctionSpec {
             .map_err(|err| ParamError::ParseError("eval", err))?;
         let needs_impl = params.remove("noimpl").is_none();
         let nth_entry_of = params.remove("nth").map(parse_index_specifier).transpose()?;
+        let segment = SegmentType::from_str(params.remove("segment").unwrap_or_default()).unwrap_or(SegmentType::Any);
         // for key in params.keys() {
             // log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
             // return Err(ParamError::UnknownParam(str.deref().to_owned()));
         // }
+        let addrs = vec![];
 
         Ok(Self {
             name,
@@ -106,6 +133,8 @@ impl FunctionSpec {
             nth_entry_of,
             file_name,
             needs_impl,
+            segment,
+            addrs
         })
     }
 }
@@ -162,8 +191,9 @@ mod tests {
             "/// @nth 5/24",
             "/// @offset 13",
             "/// @eval fn",
+            "/// @segment rdata",
         ];
-        let spec = FunctionSpec::new(
+        let spec = SymbolSpec::new(
             "test".into(),
             "test::test".into(),
             Type::Function(spec_type.into()),
@@ -173,10 +203,11 @@ mod tests {
 
         assert_matches!(
             spec,
-            Some(Ok(FunctionSpec {
+            Some(Ok(SymbolSpec {
                 nth_entry_of: Some((5, 24)),
                 offset: Some(13),
                 eval: Some(Expr::Ident(_)),
+                segment: SegmentType::RData,
                 ..
             }))
         )
@@ -190,7 +221,7 @@ mod tests {
             "/// @offset -0x13",
             "/// @eval fn",
         ];
-        let spec = FunctionSpec::new(
+        let spec = SymbolSpec::new(
             "test".into(),
             "test::test".into(),
             Type::Function(spec_type.into()),
@@ -200,12 +231,65 @@ mod tests {
 
         assert_matches!(
             spec,
-            Some(Ok(FunctionSpec {
+            Some(Ok(SymbolSpec {
                 nth_entry_of: Some((5, 24)),
                 offset: Some(-0x13),
                 eval: Some(Expr::Ident(_)),
                 ..
             }))
         )
+    }
+    #[test]
+    fn parse_vft_decl() {
+        let spec_type = FunctionType::new(vec![], Type::Void, FunctionEnum::Typedef);
+        let comment = [
+            "/// @pattern",
+            "///     /vft                                        // GetNativeType",
+            "///     /vft                                        // GetType",
+            "///     /vft                                        // GetAllocator",
+            "///     /vft(ISerializable_dstr)                    // ~ISerializable",
+            "///     /vft(null)                                  // sub_20",
+            "///     /vft(null)                                  // sub_28",
+            "///     /vft                                        // sub_30",
+            "///     /vft(null)                                  // sub_38",
+            "///     /vft(ISerializable_OnSerialize)             // sub_40",
+            "///     /vft(ISerializable_OnSerializeToText)       // sub_48",
+            "///     /vft(ISerializable_OnSerializeFromText)     // sub_50",
+            "///     /vft(ret 0)                                 // sub_58",
+            "///     /vft(ret(0))                                // sub_60",
+            "///     /vft(ret(0))                                // sub_68",
+            "/// @segment rdata",
+        ];
+        let spec = SymbolSpec::new(
+            "test".into(),
+            "test::test".into(),
+            Type::Function(spec_type.into()),
+            comment.into_iter(),
+            None,
+        );
+
+        assert_matches!(
+            spec,
+            Some(Ok(SymbolSpec {
+                segment: SegmentType::RData,
+                ..
+            }))
+        );
+        assert_matches!(spec.unwrap().unwrap().pattern.parts(), &[
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Null)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Null)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Null)),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Return(0))),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Return(0))),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Return(0))),
+        ]);
     }
 }

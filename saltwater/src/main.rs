@@ -5,7 +5,7 @@ use saltwater::codespan::LineIndex;
 use saltwater::hir::Variable;
 use saltwater::{check_semantics, get_str, Opt, StorageClass};
 use zoltan::opts::Opts;
-use zoltan::spec::FunctionSpec;
+use zoltan::spec::SymbolSpec;
 use zoltan::types::Type;
 
 mod error;
@@ -53,7 +53,7 @@ fn run(opts: &Opts) -> Result<()> {
                 .take_while(|str| str.starts_with("///"));
 
             if let Type::Function(fn_type) = resolver.resolve_type(function_type)? {
-                if let Some(spec) = FunctionSpec::new(
+                if let Some(spec) = SymbolSpec::new(
                     get_str!(var.id).into(),
                     get_str!(var.id).into(),
                     Type::Function(fn_type),

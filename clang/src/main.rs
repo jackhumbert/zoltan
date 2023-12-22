@@ -9,7 +9,7 @@ use flexi_logger::{LogSpecification, Logger};
 use glob::glob;
 
 use zoltan::opts::Opts;
-use zoltan::spec::FunctionSpec;
+use zoltan::spec::SymbolSpec;
 use zoltan::types::{FunctionEnum, Type};
 use zoltan::ustr::Ustr;
 
@@ -210,7 +210,7 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                     } else {
                         None
                     };
-                    match FunctionSpec::new(
+                    match SymbolSpec::new(
                         name,
                         name,
                         Type::Function(typ),
@@ -250,7 +250,7 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                     } else {
                         None
                     };
-                    match FunctionSpec::new(name, full_name, var_type, comment.as_str().lines(), file_name)
+                    match SymbolSpec::new(name, full_name, var_type, comment.as_str().lines(), file_name)
                     {
                         Some(Ok(spec)) => specs.push(spec),
                         // Some(Err(err)) =>  log::warn!("{}", err),
@@ -323,7 +323,7 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                 //     }
                 // }
                 // let file_name = ent.get_lexical_parent();
-                match FunctionSpec::new(
+                match SymbolSpec::new(
                     name.into(),
                     full_name.into(),
                     Type::Function(alt_typ),

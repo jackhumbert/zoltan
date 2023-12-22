@@ -3,19 +3,23 @@ use std::collections::HashMap;
 
 use ustr::Ustr;
 use serde_json::Value;
+use rayon::prelude::*;
 
 use crate::error::{Result, SymbolError};
 use crate::eval::EvalContext;
 use crate::exe::ExecutableData;
 use crate::patterns;
-use crate::spec::FunctionSpec;
+use crate::spec::{SymbolSpec, SegmentType};
 use crate::types::Type;
+use crate::codegen::format_name_for_addr;
+
 
 pub fn resolve_in_exe(
-    specs: Vec<FunctionSpec>,
+    specs: Vec<SymbolSpec>,
     exe: &ExecutableData,
 ) -> Result<(Vec<FunctionSymbol>, Vec<SymbolError>, Vec<FunctionSymbol>)> {
-    let mut strings = vec![];
+    let mut strings: Vec<String> = vec![];
+
     for spec in specs.iter() {
         for pat in spec.pattern.parts() {
             match pat {
@@ -26,39 +30,18 @@ pub fn resolve_in_exe(
             }
         }
     }
-    let mut match_map: HashMap<usize, Vec<u64>> = HashMap::new();
-    for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.text()) {
-        match_map
-            .entry(mat.pattern)
-            .or_default()
-            .push(mat.rva + exe.text_offset_from_base());
-    }
-    // also look through RDATA - this will cause issues with duplicate finds (if any exist)
-    for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.rdata()) {
-        match_map
-            .entry(mat.pattern)
-            .or_default()
-            .push(mat.rva + exe.rdata_offset_from_base());
-    }
-    // look through data too
-    for mat in patterns::multi_search(specs.iter().map(|spec| &spec.pattern), exe.data()) {
-        match_map
-            .entry(mat.pattern)
-            .or_default()
-            .push(mat.rva + exe.data_offset_from_base());
-    }
 
+    let mut refs: HashMap<String, Vec<u64>> = HashMap::new();
+    
     let mut syms = vec![];
     let mut notf = vec![];
     let mut errs = vec![];
-
-    let mut refs: HashMap<String, Vec<u64>> = HashMap::new();
 
     // load addresses from .json
     let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_addresses.json").unwrap();
     let list: Value = serde_json::from_str(&file).unwrap();
     for value in list.as_array().unwrap() {
-        refs.insert(value["symbol"].as_str().unwrap().into(), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000]);
+        refs.insert(format_name_for_addr(value["symbol"].as_str().unwrap().into()), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000]);
         syms.push(FunctionSymbol::new(
             value["symbol"].as_str().unwrap().into(), 
             value["symbol"].as_str().unwrap().into(), 
@@ -72,7 +55,7 @@ pub fn resolve_in_exe(
     let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_classes.json").unwrap();
     let list: Value = serde_json::from_str(&file).unwrap();
     for value in list.as_array().unwrap() {
-        refs.insert(value["symbol"].as_str().unwrap().into(), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap()]);
+        refs.insert(format_name_for_addr(value["symbol"].as_str().unwrap().into()), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap()]);
         syms.push(FunctionSymbol::new(
             value["symbol"].as_str().unwrap().into(), 
             value["symbol"].as_str().unwrap().into(), 
@@ -96,99 +79,120 @@ pub fn resolve_in_exe(
     refs.insert("null".to_owned(), patterns::single_search(vec![
             vec![0xC2, 0x00, 0x00, 0xCC]
         ], exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect());
+
+    // load functions that return 0
     refs.insert("ret0".to_owned(), patterns::single_search(vec![
             vec![0x32, 0xC0, 0xC3, 0xCC],
             vec![0x33, 0xC0, 0xC3, 0xCC],
             vec![0xC2, 0x00, 0x00, 0xCC],
         ], exe.text()).iter().map(|x| x + exe.text_offset_from_base()).collect());
 
-    for (i, fun) in specs.iter().enumerate() {
-        match match_map.get(&i).map(|vec| &vec[..]) {
-            Some([addr]) => syms.push(resolve_symbol(fun, exe, *addr)?),
-            Some(addrs) => {
-                if let Some((n, max)) = fun.nth_entry_of {
-                    match addrs.get(n) {
-                        Some(rva) if max == addrs.len() || max == 0 => {
-                            syms.push(resolve_symbol(fun, exe, *rva)?)
-                        }
-                        _ => { }
-                    }
-                }
+    let mut text_specs = vec![];
+    let mut idata_specs = vec![];
+    let mut rdata_specs = vec![];
+    let mut data_specs = vec![];
+    let mut pdata_specs = vec![];
+
+    for spec in specs {
+        match spec.segment {
+            SegmentType::Any => {
+                text_specs.push(spec);
+            },
+            SegmentType::Text => {
+                text_specs.push(spec);
+            },
+            SegmentType::IData => {
+                idata_specs.push(spec);
             }
-            None => { }
+            SegmentType::RData => {
+                rdata_specs.push(spec);
+            }
+            SegmentType::Data => {
+                data_specs.push(spec);
+            }
+            SegmentType::PData => {
+                pdata_specs.push(spec);
+            }
         }
     }    
-    for mat in patterns::multi_search_ref(specs.iter().map(|spec| &spec.pattern), exe.text(), exe.text_offset_from_base(), &refs) {
-        match_map
-            .entry(mat.pattern)
-            .or_default()
-            .push(mat.rva + exe.text_offset_from_base());
-    }    
-    for mat in patterns::multi_search_ref(specs.iter().map(|spec| &spec.pattern), exe.rdata(), exe.rdata_offset_from_base(), &refs) {
-        match_map
-            .entry(mat.pattern)
-            .or_default()
-            .push(mat.rva + exe.rdata_offset_from_base());
+
+    let mut all_specs = vec![];
+
+    for (addrs, mut spec) in patterns::multi_search_ref(text_specs.iter().map(|x| &x.pattern), exe.text(), exe.text_offset_from_base(), &refs).iter().zip(text_specs) {
+        if addrs.is_empty() && spec.segment == SegmentType::Any {
+            rdata_specs.push(spec);
+        } else {
+            spec.add_addrs(addrs);
+            let name = format_name_for_addr(spec.full_name.into());
+            for addr in addrs {
+                log::info!("{}: 0x{:X}", name, addr);
+            }
+            refs.insert(name, addrs.to_owned());
+            all_specs.push(spec);
+        }
     }
-    for (i, fun) in specs.iter().enumerate() {
-        match match_map.get(&i).map(|vec| &vec[..]) {
-            Some([addr]) => {
-                let symbol = resolve_symbol(fun, exe, *addr)?;
-                if !syms.contains(&symbol) {
-                    syms.push(symbol);
-                }
-                // for part in fun.pattern.groups() {
-                //     match part {
-                //         (name, VarType::Rel, offset) => {
-                //             if name != "" {
-                //                 let rva = exe.resolve_call_rdata(exe.rel_offset(*addr + offset as u64))? - exe.image_base();
-                //                 syms.push(FunctionSymbol::new(
-                //                     format!("{}_{}", fun.name, name).into(),
-                //                     format!("{}_{}", fun.full_name, name).into(),
-                //                     fun.spec_type.clone(),
-                //                     rva,
-                //                     fun.file_name,
-                //                     false,
-                //                 ))
-                //             }
-                //         }
-                //         _ => {}
-                //     }
-                // }
+    
+    for (addrs, mut spec) in patterns::multi_search_ref(rdata_specs.iter().map(|x| &x.pattern), exe.rdata(), exe.rdata_offset_from_base(), &refs).iter().zip(rdata_specs) {
+        if addrs.is_empty() && spec.segment == SegmentType::Any {
+            data_specs.push(spec);
+        } else {
+            spec.add_addrs(addrs);
+            let name = format_name_for_addr(spec.full_name.into());
+            for addr in addrs {
+                log::info!("{}: 0x{:X}", name, addr);
+            }
+            refs.insert(name, addrs.to_owned());
+            all_specs.push(spec);
+        }
+    }
+    
+    for (addrs, mut spec) in patterns::multi_search_ref(data_specs.iter().map(|x| &x.pattern), exe.data(), exe.data_offset_from_base(), &refs).iter().zip(data_specs) {
+        spec.add_addrs(addrs);
+        let name = format_name_for_addr(spec.full_name.into());
+        for addr in addrs {
+            log::info!("{}: 0x{:X}", name, addr);
+        }
+        refs.insert(name, addrs.to_owned());
+        all_specs.push(spec);
+    }
+
+    for spec in all_specs {
+        match spec.addrs[..] {
+            [addr] => {
+                let symbol = resolve_symbol(&spec, exe, addr)?;
+                syms.push(symbol);
             },
-            Some(addrs) => {
-                if let Some((n, max)) = fun.nth_entry_of {
-                    match addrs.get(n) {
-                        Some(rva) if max == addrs.len() || max == 0 => {
-                            let symbol = resolve_symbol(fun, exe, *rva)?;
-                            if !syms.contains(&symbol) {
-                                syms.push(symbol);
-                            }
+            [] => {
+                errs.push(SymbolError::NoMatches(spec.full_name));
+                notf.push(FunctionSymbol::new(spec.name, spec.full_name, spec.spec_type.clone(), 0, spec.file_name, spec.needs_impl));
+            },
+            _ => {
+                if let Some((n, max)) = spec.nth_entry_of {
+                    match spec.addrs.get(n) {
+                        Some(rva) if max == spec.addrs.len() || max == 0 => {
+                            let symbol = resolve_symbol(&spec, exe, *rva)?;
+                            syms.push(symbol);
                         }
                         Some(_) => {
-                            errs.push(SymbolError::CountMismatch(fun.full_name, addrs.len()));
-                            notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
+                            errs.push(SymbolError::CountMismatch(spec.full_name, spec.addrs.len()));
+                            notf.push(FunctionSymbol::new(spec.name, spec.full_name, spec.spec_type.clone(), 0, spec.file_name, spec.needs_impl));
                         }
                         None => {
-                            errs.push(SymbolError::NotEnoughMatches(fun.full_name, addrs.len()));
-                            notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
+                            errs.push(SymbolError::NotEnoughMatches(spec.full_name, spec.addrs.len()));
+                            notf.push(FunctionSymbol::new(spec.name, spec.full_name, spec.spec_type.clone(), 0, spec.file_name, spec.needs_impl));
                         }
                     }
                 } else {
-                    errs.push(SymbolError::MoreThanOneMatch(fun.full_name, addrs.len()));
-                    notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
+                    errs.push(SymbolError::MoreThanOneMatch(spec.full_name, spec.addrs.len()));
+                    notf.push(FunctionSymbol::new(spec.name, spec.full_name, spec.spec_type.clone(), 0, spec.file_name, spec.needs_impl));
                 }
-            }
-            None => {
-                errs.push(SymbolError::NoMatches(fun.full_name));
-                notf.push(FunctionSymbol::new(fun.name, fun.full_name, fun.spec_type.clone(), 0, fun.file_name, fun.needs_impl));
-            }
+            },
         }
     }    
     Ok((syms, errs, notf))
 }
 
-fn resolve_symbol(spec: &FunctionSpec, data: &ExecutableData, rva: u64) -> Result<FunctionSymbol> {
+fn resolve_symbol(spec: &SymbolSpec, data: &ExecutableData, rva: u64) -> Result<FunctionSymbol> {
     let res = match &spec.eval {
         Some(expr) => {
             expr.eval(&EvalContext::new(&spec.pattern, data, data.rel_offset(rva))?)? - data.image_base()

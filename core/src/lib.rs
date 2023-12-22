@@ -19,13 +19,13 @@ use std::fs::File;
 use error::Result;
 use exe::ExecutableData;
 use opts::Opts;
-use spec::FunctionSpec;
+use spec::SymbolSpec;
 use types::TypeInfo;
 pub use ustr;
 
 use crate::exe::ExeProperties;
 
-pub fn process_specs(specs: Vec<FunctionSpec>, type_info: &TypeInfo, opts: &Opts) -> Result<()> {
+pub fn process_specs(specs: Vec<SymbolSpec>, type_info: &TypeInfo, opts: &Opts) -> Result<()> {
     let exe_bytes = std::fs::read(&opts.exe_path)?;
     let exe = object::read::File::parse(&*exe_bytes)?;
     let data = ExecutableData::new(&exe)?;

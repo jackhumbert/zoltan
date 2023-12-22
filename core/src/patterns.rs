@@ -96,9 +96,10 @@ impl PatItem {
                 }
             },
             PatItem::ByteCode(ByteCode::Retn) => { return matches!(bytes.next(), Some((_, 0xC3))) },
-            _ => if bytes.advance_by(self.size()).is_err() {
+            PatItem::Any | PatItem::ByteCode(ByteCode::Vft(VftType::Any)) => if bytes.advance_by(self.size()).is_err() {
                 return false;
             },
+            _ => { return false; }
         }
         true
     }
@@ -106,50 +107,56 @@ impl PatItem {
     pub fn does_match_ref(&self, bytes: &mut std::iter::Enumerate<std::slice::Iter<'_, u8>>, start: u64, refs: &HashMap<String, Vec<u64>>) -> bool {
         match self {
             PatItem::ByteCode(ByteCode::Vft(VftType::Null)) => {
-                let mut addr: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
-                for i in 0..self.size() {
-                    if let Some(b) = bytes.next() {
-                        addr[i] = b.1.to_owned();
-                    } else {
-                        return false;
+                if let Some(addrs) = refs.get("null") {
+                    let mut addr_bytes: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+                    for i in 0..self.size() {
+                        if let Some((_, &b)) = bytes.next() {
+                            addr_bytes[i] = b;
+                        } else {
+                            return false;
+                        }
+                    }
+                    let byte_addr = u64::from_ne_bytes(addr_bytes);
+                    for &addr in addrs {
+                        if addr == byte_addr - 0x0140000000 {
+                            return true;
+                        }
                     }
                 }
-                return refs
-                    .get("null")
-                    .unwrap()
-                    .iter()
-                    .find(|x| **x == u64::from_ne_bytes(addr) - 0x0140000000)
-                    .is_some()
+                return false;
             },
             PatItem::ByteCode(ByteCode::Vft(VftType::Return(value))) => {
-                let mut addr: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
-                for i in 0..self.size() {
-                    if let Some(b) = bytes.next() {
-                        addr[i] = b.1.to_owned();
-                    } else {
-                        return false;
+                if let Some(addrs) = refs.get(format!("ret{}", value).as_str()) {
+                    let mut addr_bytes: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+                    for i in 0..self.size() {
+                        if let Some((_, &b)) = bytes.next() {
+                            addr_bytes[i] = b;
+                        } else {
+                            return false;
+                        }
+                    }
+                    let byte_addr = u64::from_ne_bytes(addr_bytes);
+                    for &addr in addrs {
+                        if addr == byte_addr - 0x0140000000 {
+                            return true;
+                        }
                     }
                 }
-                return refs
-                    .get(format!("ret{}", value).as_str())
-                    .unwrap_or(&vec![])
-                    .iter()
-                    .find(|x| **x == u64::from_ne_bytes(addr) - 0x0140000000)
-                    .is_some()
+                return false;
             },
             PatItem::ByteCode(ByteCode::Vft(VftType::Ref(name))) => {
                 if let Some(addrs) = refs.get(name) {
-                    let mut offset = 0;
-                    let mut addr_bytes = vec![];
-                    for _ in 0..4 {
-                        if let Some((o, &b)) = bytes.next() {
-                            addr_bytes.push(b);
-                            offset = o;
+                    let mut addr_bytes: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+                    for i in 0..self.size() {
+                        if let Some((_, &b)) = bytes.next() {
+                            addr_bytes[i] = b;
+                        } else {
+                            return false;
                         }
                     }
-                    let byte_addr = i32::from_ne_bytes(addr_bytes.try_into().unwrap());
-                    for addr in addrs {
-                        if ((start + 1 + offset as u64) as i64 + byte_addr as i64) as u64 == *addr  {
+                    let byte_addr = u64::from_ne_bytes(addr_bytes);
+                    for &addr in addrs {
+                        if addr == byte_addr - 0x0140000000 {
                             return true;
                         }
                     }
@@ -406,15 +413,15 @@ peg::parser! {
         rule var_type() -> VarType
             = "rel" { VarType::Rel }
         rule number() -> u64
-            = "0x" n:$(['0'..='9' | 'A'..='F']*) {? u64::from_str_radix(n, 16).or(Err("return number")) }
-            / n:$(['0'..='9']*) {? u64::from_str_radix(n, 10).or(Err("return number")) }
+            = "0x" n:$(['0'..='9' | 'A'..='F']+) {? u64::from_str_radix(n, 16).or(Err("return number")) }
+            / n:$(['0'..='9']+) {? u64::from_str_radix(n, 10).or(Err("return number")) }
         rule ret() -> u64
             = "(" _ n:number() _ ")" { n }
             / _ n:number() _ { n }
         rule vft() -> VftType
             = "pure" { VftType::PureCall }
             / "null" { VftType::Null }
-            / "ret" _ ret:ret() { VftType::Return(ret) }
+            / "ret" ret:ret() { VftType::Return(ret) }
             // / b:byte() ++ _ { VftType::Bytes(b) }
             / id:ident() { VftType::Ref(id) }
         rule byte_code() ->  ByteCode
@@ -445,7 +452,7 @@ pub fn single_search(sequences: Vec<Vec<u8>>, haystack: &[u8]) -> Vec<u64> {
     matches
 }
 
-pub fn multi_search<'a, I>(patterns: I, haystack: &[u8]) -> Vec<Match>
+pub fn multi_search<'a, I>(patterns: I, haystack: &[u8], segment_start: u64) -> Vec<Vec<u64>>
 where
     I: IntoIterator<Item = &'a Pattern>,
 {
@@ -478,7 +485,7 @@ where
     }
 
     let ac = AhoCorasick::new(&sequences);
-    let mut matches = vec![];
+    let mut matches: Vec<Vec<u64>> = vec![];
 
     for mat in ac.find_overlapping_iter(haystack) {
         let (pat, offset) = items[mat.pattern()];
@@ -487,46 +494,48 @@ where
             let slice = &haystack[start..start + pat.size()];
 
             if pat.does_match(slice, start as u64) {
-                let mat = Match {
-                    pattern: mat.pattern(),
-                    rva: start as u64,
-                };
-                matches.push(mat);
+                // let mat = Match {
+                //     pattern: mat.pattern(),
+                //     rva: start as u64 - segment_start,
+                // };
+                // matches.push(mat);
+                matches[mat.pattern()].push(start as u64 - segment_start);
             }
         }
     }
     matches
 }
 
-pub fn multi_search_ref<'a, I>(patterns: I, haystack: &[u8], segment_start: u64, refs: &HashMap<String, Vec<u64>>) -> Vec<Match>
+pub fn multi_search_ref<'a, I>(patterns: I, haystack: &[u8], segment_start: u64, refs: &HashMap<String, Vec<u64>>) -> Vec<Vec<u64>>
 where
     I: IntoIterator<Item = &'a Pattern>,
 {
     let mut items = vec![];
     let mut sequences: Vec<Vec<u8>> = vec![];
+    let mut matches: Vec<Vec<u64>> = vec![];
 
     for pat in patterns {
         // if !pat.parts.iter().filter(|x| match x {
         //     PatItem::Group(_, VarType::Ref) => true,
         //     _ => false
         // }).collect::<Vec<&PatItem>>().is_empty() {
-            let seq = pat.longest_byte_sequence_ref(refs);
-            let start = offset_from(pat.parts(), seq);
-            let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
-            items.push((pat, offset));
-            sequences.push(seq.iter().flat_map(|x| {
-                let bytes = x.to_bytes_ref(refs);
-                if bytes.is_empty() {
-                    None
-                } else {
-                    Some(bytes.as_slice().to_owned())
-                }
-            }).flatten().collect());
+        let seq = pat.longest_byte_sequence_ref(refs);
+        let start = offset_from(pat.parts(), seq);
+        let offset: usize = pat.parts[0..start].iter().map(PatItem::size).sum();
+        items.push((pat, offset));
+        sequences.push(seq.iter().flat_map(|x| {
+            let bytes = x.to_bytes_ref(refs);
+            if bytes.is_empty() {
+                None
+            } else {
+                Some(bytes.as_slice().to_owned())
+            }
+        }).flatten().collect());
         // }
+        matches.push(vec![]);
     }
 
     let ac = AhoCorasick::new(&sequences);
-    let mut matches = vec![];
 
     for mat in ac.find_overlapping_iter(haystack) {
         let (pat, offset) = items[mat.pattern()];
@@ -535,11 +544,12 @@ where
             let slice = &haystack[start..start + pat.size()];
 
             if pat.does_match_ref(slice, segment_start + start as u64, refs) {
-                let mat = Match {
-                    pattern: mat.pattern(),
-                    rva: start as u64,
-                };
-                matches.push(mat);
+                // let mat = Match {
+                //     pattern: mat.pattern(),
+                //     rva: start as u64,
+                // };
+                // matches.push(mat);
+                matches[mat.pattern()].push(start as u64 + segment_start);
             }
         }
     }
@@ -585,12 +595,13 @@ mod tests {
             PatItem::Any,
         ]);
 
-        let pat = Pattern::parse("/vft /vft(rttiIType_GetERTTITypeString) /vft(pure) /vft(null) /vft(ret 0)").unwrap();
+        let pat = Pattern::parse("/vft /vft(rttiIType_GetERTTITypeString) /vft(pure) /vft(null) /vft(ret(0)) /vft(ret 0)").unwrap();
         assert_matches!(pat.parts(), &[
             PatItem::ByteCode(ByteCode::Vft(VftType::Any)),
             PatItem::ByteCode(ByteCode::Vft(VftType::Ref(_))),
             PatItem::ByteCode(ByteCode::Vft(VftType::PureCall)),
             PatItem::ByteCode(ByteCode::Vft(VftType::Null)),
+            PatItem::ByteCode(ByteCode::Vft(VftType::Return(0))),
             PatItem::ByteCode(ByteCode::Vft(VftType::Return(0))),
         ]);
         if let Some(n) = pat.parts().get(1) {
@@ -623,11 +634,10 @@ mod tests {
             0x9C, 0x0D, 0x1C, 0x53, 0x1D, 0x35, 0xFD, 0x98, 0x07, 0x10, 0x22, 0x49, 0xC5, 0xBB, 0x5E, 0x83,
             0xF1, 0xBF, 0x49, 0x8E, 0x78, 0x32, 0x17, 0xC1, 0x6F, 0xBA, 0x83, 0x5B, 0x5D, 0x83, 0x89, 0xBF,
         ];
-        assert_matches!(multi_search([&pat1, &pat2, &pat3], &haystack).as_slice(), &[
-            Match { pattern: 0, rva: 6 },
-            Match { pattern: 1, rva: 12 },
-            Match { pattern: 2, rva: 25 },
-        ]);
+        let matches = multi_search([&pat1, &pat2, &pat3], &haystack, 0);
+        assert_eq!(matches[0], [6]);
+        assert_eq!(matches[1], [12]);
+        assert_eq!(matches[2], [25]);
     }
 
     #[test]
