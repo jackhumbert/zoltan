@@ -9,11 +9,13 @@ pub struct Opts {
     pub r4e_output_path: Option<PathBuf>,
     pub rust_output_path: Option<PathBuf>,
     pub idc_output_path: Option<PathBuf>,
+    pub til_output_path: Option<PathBuf>,
     pub strip_namespaces: bool,
     pub eager_type_export: bool,
     pub compiler_flags: Vec<String>,
     pub show_clang_errors: bool,
     pub safe_addr: bool,
+    pub skip_lookup: bool,
 }
 
 impl Opts {
@@ -43,6 +45,11 @@ impl Opts {
             .argument("IDC")
             .from_str::<PathBuf>()
             .optional();
+        let til_output_path = long("til-output")
+            .help("TIL file to write")
+            .argument("TIL")
+            .from_str::<PathBuf>()
+            .optional();
         let rust_output_path = long("rust-output")
             .help("Rust file with offsets to write")
             .argument_os("RUST")
@@ -64,6 +71,9 @@ impl Opts {
             .help("Show all of the clang compiler messages")
             .switch();
         let safe_addr = long("safe-addr").help("Wrap defines in conditionals").switch();
+        let skip_lookup = long("skip-lookup")
+            .help("Export only processed types")
+            .switch();
 
         let parser = construct!(Opts {
             source_path,
@@ -72,12 +82,14 @@ impl Opts {
             c_output_path,
             r4e_output_path,
             idc_output_path,
+            til_output_path,
             rust_output_path,
             strip_namespaces,
             eager_type_export
             compiler_flags,
             show_clang_errors,
-            safe_addr
+            safe_addr,
+            skip_lookup,
         });
 
         Info::default().descr(header).for_parser(parser).run()

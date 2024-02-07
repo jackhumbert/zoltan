@@ -45,81 +45,28 @@ impl TypeResolver {
             clang::EntityKind::StructDecl
             | clang::EntityKind::ClassDecl
             | clang::EntityKind::ClassTemplate => {
+                // let needs_resolved = match self.structs.get(&name.into()) {
+                //     Some(_) => !entity.get_children().is_empty(),
+                //     None => true,
+                // };
                 if !self.structs.contains_key(&name.into()) {
-                    self.structs.insert(name.into(), StructType::stub(name));
-
+                    // if !entity.get_children().is_empty() {
                     let size = entity.get_type().and_then(|t| t.get_sizeof().ok());
                     let mut ent = None;
                     if let Some(template) = entity.get_template() {
+                        self.structs.insert(name.into(), StructType::stub(name));
                         let res = self.resolve_struct(name, template, size);
-                        if res.is_ok() {
-                            let mut strt = res.unwrap();
-                            if name.to_string().starts_with("RED4ext::Handle") {
-                                if let Some(typ) = self.get_template_type(entity) {
-                                    strt.base.clear();
-                                    strt.members.push(DataMember {
-                                        name: "instance".into(),
-                                        typ: Type::Pointer(typ.into()),
-                                        bit_offset: Some(0),
-                                        is_bitfield: false,
-                                    });
-                                    if let Some(ref_cnt_typ) =
-                                        self.local_types.get(&Ustr::from("RED4ext::RefCnt"))
-                                    {
-                                        let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
-                                        strt.members.push(DataMember {
-                                            name: "refCount".into(),
-                                            typ: Type::Pointer(ref_cnt_rc),
-                                            bit_offset: Some(8),
-                                            is_bitfield: false,
-                                        });
-                                    } else {
-                                        strt.members.push(DataMember {
-                                            name: "refCount".into(),
-                                            typ: Type::Pointer(Type::Void.into()),
-                                            bit_offset: Some(8),
-                                            is_bitfield: false,
-                                        });
-                                    }
-                                }
-                            } else if name.to_string().starts_with("RED4ext::WeakHandle") {
-                                if let Some(typ) = self.get_template_type(entity) {
-                                    strt.base.clear();
-                                    strt.members.push(DataMember {
-                                        name: "instance".into(),
-                                        typ: Type::Pointer(typ.into()),
-                                        bit_offset: Some(0),
-                                        is_bitfield: false,
-                                    });
-                                    if let Some(ref_cnt_typ) =
-                                        self.local_types.get(&Ustr::from("RED4ext::RefCnt"))
-                                    {
-                                        let ref_cnt_rc = ref_cnt_typ.clone().into_reference().unwrap();
-                                        strt.members.push(DataMember {
-                                            name: "refCount".into(),
-                                            typ: Type::Pointer(ref_cnt_rc),
-                                            bit_offset: Some(8),
-                                            is_bitfield: false,
-                                        });
-                                    } else {
-                                        strt.members.push(DataMember {
-                                            name: "refCount".into(),
-                                            typ: Type::Pointer(Type::Void.into()),
-                                            bit_offset: Some(8),
-                                            is_bitfield: false,
-                                        });
-                                    }
-                                }
-                            } else {
-                            }
-                            ent = Some(strt);
+                        ent = res.ok();
+                    } else {
+                        if !entity.get_children().is_empty() {
+                            self.structs.insert(name.into(), StructType::stub(name));
+                            ent = self.resolve_struct(name, entity, size).ok();
                         }
-                    };// else {
-                        // ent = Some(self.resolve_struct(name, entity, size).unwrap());
-                    // };
+                    }
                     if ent.is_some() {
                         self.structs.insert(name.into(), ent.unwrap());
                     }
+                    // }
                 }
                 Ok(Type::Struct(name.into()))
             }
@@ -294,6 +241,9 @@ impl TypeResolver {
         size: Option<usize>,
     ) -> Result<StructType> {
         let children = entity.get_children();
+        // if children.len() == 0 {
+        //     Error::CompilerErrors("no children".to_owned());
+        // }
         let mut base = vec![];
         // let base = children
         //     .iter()
@@ -318,7 +268,13 @@ impl TypeResolver {
         let mut vft_index = 0;
         let nice_name: Option<Ustr> = None;
 
+        // if name == "ISerializable" {
+        //     log::info!("ISerializable:")
+        // }
         for child in children {
+            // if name == "ISerializable" {
+            //     log::info!("* {:?}", child.get_kind());
+            // }
             match child.get_kind() {
                 clang::EntityKind::BaseSpecifier => {
                     if let Some(base_o) = child
@@ -436,26 +392,26 @@ impl TypeResolver {
         })
     }
 
-    pub fn get_red_name(&mut self, entity: clang::Entity) -> Option<String> {
-        let mut red_name: Option<String> = None;
-        for child in entity.get_children() {
-            match child.get_kind() {
-                clang::EntityKind::VarDecl => {
-                    let var_name = self.get_entity_name(child);
-                    if var_name == "NAME" {
-                        match child.evaluate() {
-                            Some(clang::EvaluationResult::String(s)) => {
-                                red_name = Some(s.to_str().unwrap().into());
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        red_name
-    }
+    // pub fn get_red_name(&mut self, entity: clang::Entity) -> Option<String> {
+    //     let mut red_name: Option<String> = None;
+    //     for child in entity.get_children() {
+    //         match child.get_kind() {
+    //             clang::EntityKind::VarDecl => {
+    //                 let var_name = self.get_entity_name(child);
+    //                 if var_name == "NAME" {
+    //                     match child.evaluate() {
+    //                         Some(clang::EvaluationResult::String(s)) => {
+    //                             red_name = Some(s.to_str().unwrap().into());
+    //                         }
+    //                         _ => {}
+    //                     }
+    //                 }
+    //             }
+    //             _ => {}
+    //         }
+    //     }
+    //     red_name
+    // }
 
     fn get_vft_base(&mut self, entity: clang::Entity) -> u64 {
         if let Some(def) = entity.get_definition() {
@@ -605,40 +561,40 @@ impl TypeResolver {
         })
     }
 
-    pub fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
-        let mut cur = Some(entity);
-        let mut full_name = entity
-            .get_display_name()
-            .unwrap_or_else(|| self.name_allocator.allocate());
+    // pub fn generate_type_name(&mut self, entity: clang::Entity) -> Ustr {
+    //     let mut cur = Some(entity);
+    //     let mut full_name = entity
+    //         .get_display_name()
+    //         .unwrap_or_else(|| self.name_allocator.allocate());
 
-        // could use filename, but complicates some things
-        // full_name = match entity.get_kind() {
-        // clang::EntityKind::TranslationUnit => "".into(),
-        // _ =>  full_name
-        // };
+    //     // could use filename, but complicates some things
+    //     // full_name = match entity.get_kind() {
+    //     // clang::EntityKind::TranslationUnit => "".into(),
+    //     // _ =>  full_name
+    //     // };
 
-        while let Some(parent) = cur {
-            match parent.get_kind() {
-                // clang::EntityKind::TranslationUnit => {}
-                clang::EntityKind::Namespace if self.strip_namespaces => {}
-                _ => {
-                    let parent_name = parent.get_display_name();
-                    let prefix = parent_name.as_deref().unwrap_or("__unnamed");
-                    full_name = format!("{}::{}", prefix, full_name);
-                }
-            }
-            cur = parent.get_lexical_parent();
-        }
+    //     while let Some(parent) = cur {
+    //         match parent.get_kind() {
+    //             // clang::EntityKind::TranslationUnit => {}
+    //             clang::EntityKind::Namespace if self.strip_namespaces => {}
+    //             _ => {
+    //                 let parent_name = parent.get_display_name();
+    //                 let prefix = parent_name.as_deref().unwrap_or("__unnamed");
+    //                 full_name = format!("{}::{}", prefix, full_name);
+    //             }
+    //         }
+    //         cur = parent.get_lexical_parent();
+    //     }
 
-        full_name
-            // .replace('<', "_")
-            // .replace('>', "")
-            // .replace(',', "_")
-            // .replace('*', "_p")
-            // .replace('&', "_r")
-            // .replace(' ', "")
-            .into()
-    }
+    //     full_name
+    //         // .replace('<', "_")
+    //         // .replace('>', "")
+    //         // .replace(',', "_")
+    //         // .replace('*', "_p")
+    //         // .replace('&', "_r")
+    //         // .replace(' ', "")
+    //         .into()
+    // }
 
     pub fn generate_context_name(&mut self, entity: clang::Entity) -> Ustr {
         let mut cur = Some(entity);

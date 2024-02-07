@@ -9,6 +9,7 @@ use derive_more::{AsRef, From};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use ustr::{IdentityHasher, Ustr};
+use std::hash::{Hash, Hasher};
 
 pub const POINTER_SIZE: usize = 8;
 pub const MAX_ALIGN: usize = 8;
@@ -181,7 +182,7 @@ trait IdcFormat: std::fmt::Display {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
+#[derive(Debug, Clone, Copy, AsRef, From, Ord, PartialOrd)]
 pub struct StructId(Ustr);
 
 impl fmt::Display for StructId {
@@ -191,12 +192,27 @@ impl fmt::Display for StructId {
     }
 }
 
+impl PartialEq for StructId {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Hash for StructId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl Eq for StructId {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
 pub struct UnionId(Ustr);
 
 impl fmt::Display for UnionId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format_name_for_idc(self.0))
+        // write!(f, "{}", format_name_for_idc(self.0))
+        write!(f, "{}", self.0)
     }
 }
 
@@ -205,7 +221,8 @@ pub struct EnumId(Ustr);
 
 impl fmt::Display for EnumId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", format_name_for_idc(self.0))
+        // write!(f, "{}", format_name_for_idc(self.0))
+        write!(f, "{}", self.0)
     }
 }
 

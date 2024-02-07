@@ -40,16 +40,31 @@ pub fn resolve_in_exe(
     // load addresses from .json
     let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_addresses.json").unwrap();
     let list: Value = serde_json::from_str(&file).unwrap();
-    for value in list.as_array().unwrap() {
-        refs.insert(format_name_for_addr(value["symbol"].as_str().unwrap().into()), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000]);
-        syms.push(FunctionSymbol::new(
-            value["symbol"].as_str().unwrap().into(), 
-            value["symbol"].as_str().unwrap().into(), 
-            Type::Void, 
-            u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000, 
-            None, 
-            false
-        ));
+    for list2 in list.as_array().unwrap() {
+        for value in list2.as_array().unwrap() {
+            if value["symbol"].is_string() {
+                refs.insert(format_name_for_addr(value["symbol"].as_str().unwrap().into()), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000]);
+                // syms.push(FunctionSymbol::new(
+                //     value["symbol"].as_str().unwrap().into(), 
+                //     value["symbol"].as_str().unwrap().into(), 
+                //     Type::Void, 
+                //     u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000, 
+                //     None, 
+                //     false
+                // ));       
+            }
+            if value["hash"].is_string() {                 
+                refs.insert(value["hash"].as_str().unwrap().into(), vec![u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000]);
+                // syms.push(FunctionSymbol::new(
+                //     format!("HASH_{}", value["hash"].as_str().unwrap()).into(), 
+                //     format!("HASH_{}", value["hash"].as_str().unwrap()).into(), 
+                //     Type::Void, 
+                //     u64::from_str_radix(value["offset"].as_str().unwrap(), 16).unwrap() + 0x1000, 
+                //     None, 
+                //     false
+                // ));
+            }
+        }
     }
     // load classes & vfts from .json (from vft ripper)
     let file = std::fs::read_to_string("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\cyberpunk2077_classes.json").unwrap();

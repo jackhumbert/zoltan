@@ -1,18 +1,15 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-
 use clang::{Clang, EntityKind, EntityVisitResult, Index};
 use error::Result;
 use flexi_logger::{LogSpecification, Logger};
 // use rayon::prelude::*;
 use glob::glob;
-
 use zoltan::opts::Opts;
 use zoltan::spec::SymbolSpec;
 use zoltan::types::{FunctionEnum, Type};
 use zoltan::ustr::Ustr;
-
 
 use crate::resolver::TypeResolver;
 
@@ -48,13 +45,27 @@ fn run<'a>(opts: &Opts) -> Result<()> {
     let mut vars = HashSet::new();
     // let mut units = vec![];
 
-    let mut arguments = [opts.compiler_flags.iter().map(|f| f.replace('"', "").split(' ').map(str::to_owned).collect::<Vec<_>>()).flatten().collect::<Vec<_>>().as_slice(), &[
-        // "-include".to_owned(),
-        // "inttypes.h".to_owned(),
-        // "-include",
-        // "stdafx.hpp",
-        "-ferror-limit=1000".to_owned()
-    ]].concat();
+    let mut arguments = [
+        opts.compiler_flags
+            .iter()
+            .map(|f| {
+                f.replace('"', "")
+                    .split(' ')
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<Vec<_>>()
+            .as_slice(),
+        &[
+            // "-include".to_owned(),
+            // "inttypes.h".to_owned(),
+            // "-include",
+            // "stdafx.hpp",
+            "-ferror-limit=1000".to_owned(),
+        ],
+    ]
+    .concat();
 
     let paths = opts
         .source_path
@@ -63,29 +74,39 @@ fn run<'a>(opts: &Opts) -> Result<()> {
             if path.exists() && path.is_dir() {
                 let path_str = path.as_os_str().to_str().unwrap().to_string();
                 arguments.push(["-I", &path_str].join(""));
-                let hpp = glob(&[&path_str, "**/*.hpp"].join("")).unwrap().map(Result::unwrap).collect::<Vec<PathBuf>>();
-                let cpp = glob(&[&path_str, "**/*.cpp"].join("")).unwrap().map(Result::unwrap).collect::<Vec<PathBuf>>();
+                let hpp = glob(&[&path_str, "**/*.hpp"].join(""))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<PathBuf>>();
+                let cpp = glob(&[&path_str, "**/*.cpp"].join(""))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect::<Vec<PathBuf>>();
                 vec![hpp, cpp].concat()
             } else {
                 vec![path.to_path_buf()]
             }
         })
-        .flatten().collect::<Vec<PathBuf>>();
+        .flatten()
+        .collect::<Vec<PathBuf>>();
 
-    let filtered_paths = paths.iter().filter(|p| {
+    let filtered_paths = paths
+        .iter()
+        .filter(|p| {
             let mut exists = p.exists();
             if !exists {
                 log::error!("Could not find file: {}", p.as_os_str().to_str().unwrap());
             } else {
-                let file = std::fs::read_to_string(p).unwrap();
-                exists = file.contains("@pattern");
+                // let file = std::fs::read_to_string(p).unwrap();
+                // exists = file.contains("@pattern");
                 // if !exists {
-                    // log::warn!("Skipping {} (no patterns)", p.as_os_str().to_str().unwrap());
+                // log::warn!("Skipping {} (no patterns)", p.as_os_str().to_str().unwrap());
                 // }
             }
 
             exists
-        }).collect::<Vec<&PathBuf>>();
+        })
+        .collect::<Vec<&PathBuf>>();
 
     log::info!("Arguments: {}", arguments.join(" "));
 
@@ -98,7 +119,7 @@ fn run<'a>(opts: &Opts) -> Result<()> {
             index
                 .parser(p)
                 .arguments(&arguments)
-                .single_file_parse(opts.r4e_output_path.is_none() && opts.idc_output_path.is_none())
+                .single_file_parse(opts.r4e_output_path.is_none() && opts.idc_output_path.is_none() && opts.til_output_path.is_none())
                 // .single_file_parse(true)
                 .detailed_preprocessing_record(true)
                 .briefs_in_completion_results(true)
@@ -106,8 +127,11 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                 .keep_going(true)
                 // .ignore_non_errors_from_included_files(true)
                 .skip_function_bodies(true)
-                .to_owned().parse().expect("Parsing error")
-        }).collect::<Vec<_>>();
+                .to_owned()
+                .parse()
+                .expect("Parsing error")
+        })
+        .collect::<Vec<_>>();
 
     // let units = parsers
     //     .filter_map(|p| p.parse().expect("Parsing error").into())
@@ -136,26 +160,28 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                 .get_location()
                 .and_then(|loc| loc.get_file_location().file)
                 .map(|file| file.get_path())
-                .as_deref() 
-                {
-                    paths.contains(&path.to_path_buf())
-                } else {
-                    true
-                };
-            if is_project_file || opts.eager_type_export || opts.r4e_output_path.is_some() {
+                .as_deref()
+            {
+                paths.contains(&path.to_path_buf())
+            } else {
+                true
+            };
+            if is_project_file
+                || opts.eager_type_export
+                || opts.r4e_output_path.is_some()
+                || opts.idc_output_path.is_some()
+                || opts.til_output_path.is_some()
+            {
                 match ent.get_kind() {
                     EntityKind::InclusionDirective => {
                         // log::info!("{}", ent.get_name().unwrap_or("No name".to_owned()));
                         EntityVisitResult::Recurse
-                    },
-                    EntityKind::MacroDefinition |
-                    EntityKind::MacroExpansion => {
-                        EntityVisitResult::Recurse
-                    },
+                    }
+                    EntityKind::MacroDefinition | EntityKind::MacroExpansion => EntityVisitResult::Recurse,
                     EntityKind::Namespace => EntityVisitResult::Recurse,
                     EntityKind::TypedefDecl | EntityKind::TypeAliasDecl
                         if is_project_file || ent.get_comment().is_some() =>
-                    {                        
+                    {
                         entities.insert(ent);
                         EntityVisitResult::Continue
                     }
@@ -175,14 +201,13 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                     | EntityKind::ClassDecl
                     | EntityKind::UnionDecl
                     | EntityKind::EnumDecl => {
-                        // if opts.eager_type_export {
-                            // resolver.resolve_decl(ent).ok();
-                        // }
+                        if opts.eager_type_export || is_project_file {
+                            resolver.resolve_decl(ent).ok();
+                            // resolver.resolve_type(ent.get_type().unwrap()).ok();
+                        }
                         EntityVisitResult::Recurse
                     }
-                    _ => {
-                        EntityVisitResult::Continue
-                    },
+                    _ => EntityVisitResult::Continue,
                 }
             } else {
                 EntityVisitResult::Continue
@@ -190,57 +215,126 @@ fn run<'a>(opts: &Opts) -> Result<()> {
         });
     });
 
-    log::info!("Found {} entities", entities.len());
-    log::info!("Found {} functions", functions.len());
-    log::info!("Found {} vars", vars.len());
+    if !opts.skip_lookup {
+        log::info!("Found {} entities", entities.len());
+        log::info!("Found {} functions", functions.len());
+        log::info!("Found {} vars", vars.len());
 
-    log::info!("Collecting specs...");
+        log::info!("Collecting specs...");
 
-    for ent in entities {
-        if let Some(comment) = ent.get_comment() {
-            match resolver.resolve_type(ent.get_type().unwrap()) {
-                Ok(Type::Function(typ)) => {
-                    let name = ent.get_name_raw().unwrap().as_str().into();
-                    let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
-                        if let Some(file) = location.get_file_location().file {
-                            Some(file.get_path().to_str().unwrap().to_string().into())
+        for ent in entities {
+            if let Some(comment) = ent.get_comment() {
+                match resolver.resolve_type(ent.get_type().unwrap()) {
+                    Ok(Type::Function(typ)) => {
+                        let name = ent.get_name_raw().unwrap().as_str().into();
+                        let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
+                            if let Some(file) = location.get_file_location().file {
+                                Some(file.get_path().to_str().unwrap().to_string().into())
+                            } else {
+                                None
+                            }
                         } else {
                             None
+                        };
+                        match SymbolSpec::new(
+                            name,
+                            name,
+                            Type::Function(typ),
+                            comment.as_str().lines(),
+                            file_name,
+                        ) {
+                            Some(Ok(spec)) => specs.push(spec),
+                            // Some(Err(err)) => log::warn!("{}", err),
+                            _ => {}
                         }
-                    } else {
-                        None
-                    };
-                    match SymbolSpec::new(
-                        name,
-                        name,
-                        Type::Function(typ),
-                        comment.as_str().lines(),
-                        file_name,
-                    ) {
-                        Some(Ok(spec)) => specs.push(spec),
-                        // Some(Err(err)) => log::warn!("{}", err),
-                        _ => {}
                     }
+                    Err(err) => {
+                        log::warn!("{}", err);
+                    }
+                    _ => {}
                 }
-                Err(err) => {
-                    log::warn!("{}", err);
-                }
-                _ => {}
             }
         }
-    }
-    for ent in vars {
-        if let Some(comment) = ent.get_comment() {
-            match resolver.resolve_type(ent.get_type().unwrap()).ok() {
-                Some(Type::Constant(_)) | Some(Type::Long(_)) | Some(Type::Pointer(_)) => {
-                    let name: Ustr = ent.get_name_raw().unwrap().as_str().into();
-                    let mut full_name = name.clone();
-                    let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();
-                    if let Some(parent) = ent.get_lexical_parent() {
-                        if let Some(parent_name) = resolver.get_parent_name(parent) {
-                            full_name = format!("{}::{}", parent_name, name).into();
+        for ent in vars {
+            if let Some(comment) = ent.get_comment() {
+                match resolver.resolve_type(ent.get_type().unwrap()).ok() {
+                    Some(Type::Constant(_)) | Some(Type::Long(_)) | Some(Type::Pointer(_)) => {
+                        let name: Ustr = ent.get_name_raw().unwrap().as_str().into();
+                        let mut full_name = name.clone();
+                        let var_type = resolver.resolve_type(ent.get_type().unwrap()).unwrap();
+                        if let Some(parent) = ent.get_lexical_parent() {
+                            if let Some(parent_name) = resolver.get_parent_name(parent) {
+                                full_name = format!("{}::{}", parent_name, name).into();
+                            }
+                        }
+                        let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
+                            if let Some(file) = location.get_file_location().file {
+                                Some(file.get_path().to_str().unwrap().to_string().into())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        match SymbolSpec::new(
+                            name,
+                            full_name,
+                            var_type,
+                            comment.as_str().lines(),
+                            file_name,
+                        ) {
+                            Some(Ok(spec)) => specs.push(spec),
+                            // Some(Err(err)) =>  log::warn!("{}", err),
+                            _ => {}
                         }
                     }
+                    _ => {}
+                }
+            }
+        }
+        for ent in functions {
+            if let Some(comment) = ent.get_comment() {
+                // println!("{}", comment.as_str());
+                if let Some(Type::Function(typ)) = resolver.resolve_type(ent.get_type().unwrap()).ok() {
+                    let name = ent.get_name_raw().unwrap().as_str().to_owned();
+                    let mut full_name = name.clone();
+                    let mut alt_typ = typ.to_owned();
+                    let mut params = vec![];
+                    // let mut spec_type: Type;
+                    if let Some(parent) = ent.get_lexical_parent() {
+                        let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
+                        let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
+                        // let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit || ent.get_kind() == clang::EntityKind::TranslationUnit;
+                        if let Some(parent_name) = resolver.get_parent_name(parent) {
+                            full_name = format!("{}::{}", parent_name, name);
+                        }
+                        if let Some(parent_type) = parent.get_type() {
+                            if let Some(parent_typ) = resolver.resolve_type(parent_type).ok() {
+                                params.push(Type::Pointer(parent_typ.into()));
+                                params = [params, typ.params.clone()].concat();
+                                let func_type: FunctionEnum;
+                                if ent.is_virtual_method() {
+                                    func_type = FunctionEnum::Virtual;
+                                } else if ent.is_static_method() {
+                                    func_type = FunctionEnum::Static;
+                                } else if is_constructor {
+                                    func_type = FunctionEnum::Constructor;
+                                } else if is_destructor {
+                                    func_type = FunctionEnum::Destructor;
+                                } else {
+                                    func_type = FunctionEnum::Method;
+                                }
+                                alt_typ = zoltan::types::FunctionType::new(
+                                    params,
+                                    typ.return_type.clone(),
+                                    func_type,
+                                )
+                                .into();
+                            }
+                        }
+                    }
+
+                    // let mut cur_ent = ent;
                     let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
                         if let Some(file) = location.get_file_location().file {
                             Some(file.get_path().to_str().unwrap().to_string().into())
@@ -250,95 +344,33 @@ fn run<'a>(opts: &Opts) -> Result<()> {
                     } else {
                         None
                     };
-                    match SymbolSpec::new(name, full_name, var_type, comment.as_str().lines(), file_name)
-                    {
+                    // let mut file_name: Option<Ustr> = Some(ent.get_file().unwrap().get_path().into_os_string().into_string().unwrap().into());
+                    // while let Some(parent) = cur_ent.get_lexical_parent() {
+                    //     if parent.get_kind() == clang::EntityKind::TranslationUnit {
+                    //         file_name = Some(parent.get_display_name().unwrap().into());
+                    //         break
+                    //     } else {
+                    //         cur_ent = parent;
+                    //     }
+                    // }
+                    // let file_name = ent.get_lexical_parent();
+                    match SymbolSpec::new(
+                        name.into(),
+                        full_name.into(),
+                        Type::Function(alt_typ),
+                        comment.lines(),
+                        file_name,
+                    ) {
                         Some(Ok(spec)) => specs.push(spec),
                         // Some(Err(err)) =>  log::warn!("{}", err),
                         _ => {}
                     }
                 }
-                _ => {}
             }
         }
-    }
-    for ent in functions {
-        if let Some(comment) = ent.get_comment() {
-            // println!("{}", comment.as_str());
-            if let Some(Type::Function(typ)) = resolver.resolve_type(ent.get_type().unwrap()).ok() {
-                let name = ent.get_name_raw().unwrap().as_str().to_owned();
-                let mut full_name = name.clone();
-                let mut alt_typ = typ.to_owned();
-                let mut params = vec![];
-                // let mut spec_type: Type;
-                if let Some(parent) = ent.get_lexical_parent() {
-                    let is_constructor = ent.get_kind() == clang::EntityKind::Constructor;
-                    let is_destructor = ent.get_kind() == clang::EntityKind::Destructor;
-                    // let is_user_code = parent.get_kind() == clang::EntityKind::TranslationUnit || ent.get_kind() == clang::EntityKind::TranslationUnit;
-                    if let Some(parent_name) = resolver.get_parent_name(parent) {
-                        full_name = format!("{}::{}", parent_name, name);
-                    }
-                    if let Some(parent_type) = parent.get_type() {
-                        if let Some(parent_typ) = resolver.resolve_type(parent_type).ok() {
-                            params.push(Type::Pointer(parent_typ.into()));
-                            params = [params, typ.params.clone()].concat();
-                            let func_type: FunctionEnum;
-                            if ent.is_virtual_method() {
-                                func_type = FunctionEnum::Virtual;
-                            } else if ent.is_static_method() {
-                                func_type = FunctionEnum::Static;
-                            } else if is_constructor {
-                                func_type = FunctionEnum::Constructor;
-                            } else if is_destructor {
-                                func_type = FunctionEnum::Destructor;
-                            } else {
-                                func_type = FunctionEnum::Method;
-                            }
-                            alt_typ = zoltan::types::FunctionType::new(
-                                params,
-                                typ.return_type.clone(),
-                                func_type,
-                            )
-                            .into();
-                        }
-                    }
-                }
 
-                // let mut cur_ent = ent;
-                let file_name: Option<Ustr> = if let Some(location) = ent.get_location() {
-                    if let Some(file) = location.get_file_location().file {
-                        Some(file.get_path().to_str().unwrap().to_string().into())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                // let mut file_name: Option<Ustr> = Some(ent.get_file().unwrap().get_path().into_os_string().into_string().unwrap().into());
-                // while let Some(parent) = cur_ent.get_lexical_parent() {
-                //     if parent.get_kind() == clang::EntityKind::TranslationUnit {
-                //         file_name = Some(parent.get_display_name().unwrap().into());
-                //         break
-                //     } else {
-                //         cur_ent = parent;
-                //     }
-                // }
-                // let file_name = ent.get_lexical_parent();
-                match SymbolSpec::new(
-                    name.into(),
-                    full_name.into(),
-                    Type::Function(alt_typ),
-                    comment.lines(),
-                    file_name,
-                ) {
-                    Some(Ok(spec)) => specs.push(spec),
-                    // Some(Err(err)) =>  log::warn!("{}", err),
-                    _ => {}
-                }
-            }
-        }
+        log::info!("Found {} specs", specs.len());
     }
-
-    log::info!("Found {} specs", specs.len());
 
     zoltan::process_specs(specs, &resolver.into_types(), opts)?;
 
