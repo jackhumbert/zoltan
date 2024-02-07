@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use aho_corasick::AhoCorasick;
 use enum_as_inner::EnumAsInner;
+use std::str::FromStr;
 
-use crate::{symbols::FunctionSymbol, codegen::format_name_for_addr};
+use crate::{codegen::format_name_for_addr, spec::SegmentType, symbols::FunctionSymbol};
 
 #[derive(Debug, EnumAsInner)]
 pub enum PatItem {

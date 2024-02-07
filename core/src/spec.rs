@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
-use strum_macros::EnumString;
 
+use strum_macros::EnumString;
 use ustr::Ustr;
 
 use crate::error::{Error, ParamError, Result};
@@ -11,17 +11,17 @@ use crate::types::Type;
 
 #[derive(Debug, Copy, Clone, EnumString, PartialEq)]
 pub enum SegmentType {
-    #[strum(serialize="any")]
+    #[strum(serialize = "any")]
     Any,
-    #[strum(serialize="text")]
+    #[strum(serialize = "text", serialize = "t")]
     Text,
-    #[strum(serialize="idata")]
+    #[strum(serialize = "idata", serialize = "i")]
     IData,
-    #[strum(serialize="rdata")]
+    #[strum(serialize = "rdata", serialize = "r")]
     RData,
-    #[strum(serialize="data")]
+    #[strum(serialize = "data", serialize = "d")]
     Data,
-    #[strum(serialize="pdata")]
+    #[strum(serialize = "pdata", serialize = "p")]
     PData,
 }
 
@@ -30,14 +30,15 @@ pub struct SymbolSpec {
     pub name: Ustr,
     pub full_name: Ustr,
     pub spec_type: Type,
-    pub pattern: Pattern,
+    pub pattern: Option<Pattern>,
     pub offset: Option<i64>,
     pub eval: Option<Expr>,
     pub nth_entry_of: Option<(usize, usize)>,
     pub file_name: Option<Ustr>,
     pub needs_impl: bool,
     pub segment: SegmentType,
-    pub addrs: Vec<u64>
+    pub addrs: Vec<u64>,
+    pub hash: Option<u64>,
 }
 
 impl SymbolSpec {
@@ -61,7 +62,8 @@ impl SymbolSpec {
                 .trim_start()
                 .to_string();
             if stripped.contains("//") {
-                stripped = stripped.split("//")
+                stripped = stripped
+                    .split("//")
                     .collect::<Vec<&str>>()
                     .first()
                     .unwrap()
@@ -103,8 +105,18 @@ impl SymbolSpec {
         mut params: HashMap<&str, &str>,
         file_name: Option<Ustr>,
     ) -> Result<Self, ParamError> {
-        let pattern = Pattern::parse(params.remove("pattern").ok_or(ParamError::MissingPattern)?)
+        let pattern = params
+            .remove("pattern")
+            .map(Pattern::parse)
+            .transpose()
             .map_err(|err| ParamError::ParseError("pattern", err))?;
+        let redhash = params
+            .remove("hash")
+            .map(hash::parse)
+            .transpose()
+            .map_err(|err| ParamError::ParseError("hash", err))?;
+        let (hash, hash_segment) = redhash.map(|r| (r.hash, r.segment)).unzip();
+        let mut segment = hash_segment.unwrap_or(SegmentType::Any);
         let offset = params
             .remove("offset")
             .map(|str| parse_offset_from_str(str, "offset"))
@@ -116,10 +128,13 @@ impl SymbolSpec {
             .map_err(|err| ParamError::ParseError("eval", err))?;
         let needs_impl = params.remove("noimpl").is_none();
         let nth_entry_of = params.remove("nth").map(parse_index_specifier).transpose()?;
-        let segment = SegmentType::from_str(params.remove("segment").unwrap_or_default()).unwrap_or(SegmentType::Any);
+        if params.contains_key("segment") {
+            segment = SegmentType::from_str(params.remove("segment").unwrap_or_default())
+                .unwrap_or(SegmentType::Any)
+        };
         // for key in params.keys() {
-            // log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
-            // return Err(ParamError::UnknownParam(str.deref().to_owned()));
+        // log::warn!("{} unknown parameter: '{}'", full_name, key.deref().to_owned());
+        // return Err(ParamError::UnknownParam(str.deref().to_owned()));
         // }
         let addrs = vec![];
 
@@ -134,15 +149,35 @@ impl SymbolSpec {
             file_name,
             needs_impl,
             segment,
-            addrs
+            addrs,
+            hash,
         })
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RedHash {
+    hash: u64,
+    segment: SegmentType,
+}
+
+peg::parser! {
+    grammar hash() for str {
+        rule _() =
+            quiet!{[' ' | '\t' | '\n' | '\\']*}
+        rule number() -> u64
+            = "0x" n:$(['0'..='9' | 'A'..='F']+) {? u64::from_str_radix(n, 16).or(Err("return number")) }
+            / n:$(['0'..='9']+) {? u64::from_str_radix(n, 10).or(Err("return number")) }
+        rule segment() -> String
+            = id:$(['a'..='z' | 'A'..='Z']*) { id.to_owned() }
+        pub rule parse() ->  RedHash
+            = _ hash:number() _ ":" _ seg:segment() _ { RedHash { hash, segment: SegmentType::from_str(&seg).unwrap_or(SegmentType::Text) } }
+            / _ hash:number() _ { RedHash { hash, segment: SegmentType::Text } }
+    }
+}
+
 fn parse_typedef_comment(line: &str) -> Option<(&str, &str)> {
-    let (key, val) = line
-        .strip_prefix('@')?
-        .split_once(' ')?;
+    let (key, val) = line.strip_prefix('@')?.split_once(' ')?;
 
     Some((key.clone(), val.trim().clone()))
 }
@@ -177,11 +212,10 @@ fn parse_offset_from_str(str: &str, field: &'static str) -> Result<i64, ParamErr
 #[cfg(test)]
 mod tests {
     use std::assert_matches::assert_matches;
-    use crate::types::FunctionType;
 
     use super::*;
     use crate::eval::Expr;
-    use crate::types::{FunctionEnum, Type};
+    use crate::types::{FunctionEnum, FunctionType, Type};
 
     #[test]
     fn parse_valid_spec() {
@@ -275,21 +309,49 @@ mod tests {
                 ..
             }))
         );
-        assert_matches!(spec.unwrap().unwrap().pattern.parts(), &[
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Null)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Null)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Any)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Null)),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Ref(_))),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Return(0))),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Return(0))),
-            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(crate::patterns::VftType::Return(0))),
+        assert_matches!(spec.unwrap().unwrap().pattern.unwrap().parts(), &[
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Any
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Any
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Any
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Ref(_)
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Null
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Null
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Any
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Null
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Ref(_)
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Ref(_)
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Ref(_)
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Return(0)
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Return(0)
+            )),
+            crate::patterns::PatItem::ByteCode(crate::patterns::ByteCode::Vft(
+                crate::patterns::VftType::Return(0)
+            )),
         ]);
     }
 }

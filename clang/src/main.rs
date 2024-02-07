@@ -96,9 +96,9 @@ fn run<'a>(opts: &Opts) -> Result<()> {
             let mut exists = p.exists();
             if !exists {
                 log::error!("Could not find file: {}", p.as_os_str().to_str().unwrap());
-            } else {
-                // let file = std::fs::read_to_string(p).unwrap();
-                // exists = file.contains("@pattern");
+            } else if !opts.skip_lookup {
+                let file = std::fs::read_to_string(p).unwrap();
+                exists = file.contains("@pattern") || file.contains("@hash");
                 // if !exists {
                 // log::warn!("Skipping {} (no patterns)", p.as_os_str().to_str().unwrap());
                 // }

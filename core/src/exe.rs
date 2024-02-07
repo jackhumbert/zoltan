@@ -3,30 +3,43 @@ use object::{Architecture, BinaryFormat, Endianness, Object, ObjectSection};
 use crate::error::{Error, Result};
 
 const TEXT_SECTION: &str = ".text";
-const RDATA_SECTION: &str = ".rdata";
+const IDATA_SECTION: &str = ".rdata"; // idata in IDA is rdata i guess
+const RDATA_SECTION: &str = ".rdata"; // this isn't actually offset like it is in IDA
 const DATA_SECTION: &str = ".data";
+const PDATA_SECTION: &str = ".pdata";
 
 pub struct ExecutableData<'a> {
     text: &'a [u8],
     rdata: &'a [u8],
     data: &'a [u8],
     image_base: u64,
+    text_offset: u64,
+    idata_offset: u64,
     rdata_offset: u64,
     data_offset: u64,
-    text_offset: u64,
+    pdata_offset: u64,
 }
 
 impl<'a> ExecutableData<'a> {
     pub fn new(exe: &'a object::read::File<'a>) -> Result<Self> {
+        for s in exe.sections() {
+            log::info!("{}: 0x{:X}", s.name()?, s.address());
+        }
         let text = exe
             .section_by_name(TEXT_SECTION)
             .ok_or(Error::MissingSection("text"))?;
+        let idata = exe
+            .section_by_name(IDATA_SECTION)
+            .ok_or(Error::MissingSection("idata"))?;
         let rdata = exe
             .section_by_name(RDATA_SECTION)
             .ok_or(Error::MissingSection("rdata"))?;
         let data = exe
             .section_by_name(DATA_SECTION)
             .ok_or(Error::MissingSection("data"))?;
+        let pdata = exe
+            .section_by_name(PDATA_SECTION)
+            .ok_or(Error::MissingSection("pdata"))?;
 
         // could also use pdata for function addr lookups
 
@@ -35,9 +48,11 @@ impl<'a> ExecutableData<'a> {
             rdata: rdata.data()?,
             data: data.data()?,
             image_base: exe.relative_address_base(),
+            text_offset: text.address(),
+            idata_offset: idata.address(),
             rdata_offset: rdata.address(),
             data_offset: data.address(),
-            text_offset: text.address(),
+            pdata_offset: pdata.address(),
         };
         Ok(res)
     }
@@ -103,6 +118,10 @@ impl<'a> ExecutableData<'a> {
         self.text_offset - self.image_base
     }
 
+    pub fn idata_offset_from_base(&'a self) -> u64 {
+        self.idata_offset - self.image_base
+    }
+
     pub fn rdata_offset_from_base(&'a self) -> u64 {
         self.rdata_offset - self.image_base
     }
@@ -111,11 +130,17 @@ impl<'a> ExecutableData<'a> {
         self.data_offset - self.image_base
     }
 
+    pub fn pdata_offset_from_base(&'a self) -> u64 {
+        self.pdata_offset - self.image_base
+    }
+
     pub fn rel_offset(&'a self, rva: u64) -> u64 {
         let offset = if rva > self.data_offset_from_base() {
             rva - self.data_offset_from_base()
         } else if rva > self.rdata_offset_from_base() {
             rva - self.rdata_offset_from_base()
+        } else if rva > self.idata_offset_from_base() {
+            rva - self.idata_offset_from_base()
         } else if rva > self.text_offset_from_base() {
             rva - self.text_offset_from_base()
         } else {
