@@ -1,0 +1,64 @@
+//------------------------------------------------
+//--- 010 Editor v13.0.1 Script File
+//
+//      File: TIL.1sc
+//   Authors: Jack Humbert
+//   Version: 1.0
+//   Purpose: Decompressing parts of a .til file
+//  Category: Reverse Engineering
+//   History: 
+//------------------------------------------------
+
+
+#link "zlib.dll"
+int Decompress_zlib(ubyte input[], uint input_size, ubyte output[], uint output_size);
+#endlink
+
+//#link "C:\Users\Jack\Downloads\zlib-win-build-1.3.1\build-VS2022\x64\Debug\libz.dll"
+//int uncompress(ubyte input[], uint input_size[], ubyte output[], uint output_size);
+//#endlink
+
+int unzlib(uint64 ptr, uint32 csize, uint32 size) {
+    Printf("Inflating %d bytes to %d bytes\n", csize, size);
+    FSeek(ptr);
+    ubyte inbuffer[csize];
+    ubyte outbuffer[size];
+    ReadBytes(inbuffer, FTell(), csize);
+    int result = Decompress_zlib(inbuffer, csize, outbuffer, size);
+    DeleteBytes(FTell() - 4, csize + 4);
+    InsertBytes(FTell() - 4, size, 0xFF);
+    WriteBytes(outbuffer, FTell() - 4, size);
+    Printf("Decompress result: %d\n", result);
+    return result;
+}
+
+RunTemplate("TIL.bt",false);
+
+if (header.flag & TIL_ZIP) {
+    if (buckets.macros.num_defs) {
+        unzlib(startof(buckets.macros.cbuffer), buckets.macros.csize, buckets.macros.size);
+    }
+    unzlib(startof(buckets.types.cbuffer), buckets.types.csize, buckets.types.size);
+    unzlib(startof(buckets.syms.cbuffer), buckets.syms.csize, buckets.syms.size);
+    //FSeek(startof(header.flag));
+    header.flag &= ~TIL_ZIP;
+/*
+    uint64 csize = buckets.types.csize;
+    uint64 size = buckets.types.size;
+    Printf("Inflating %d bytes to %d bytes\n", csize, size);
+    ubyte comp[csize] = buckets.types.zbuffer;
+    ubyte decomp[size];
+    decompress(comp, csize, decomp, size);
+    //Printf("(%d): %s", buckets.types.size, output);
+    //local uint64 ea = FTell();
+    //FSeek(FileSize());
+    //WriteString(FileSize(), output);
+    //FSeek(0);
+    //uint i = 0;
+    //for (i = 0; i < buckets.types.size; i++) {
+    //    WriteByte(FileSize(), decomp[i]);
+    //}
+    WriteBytes(decomp, FileSize(), size);
+    //FSeek(ea);
+*/
+}

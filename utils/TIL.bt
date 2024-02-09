@@ -1,0 +1,577 @@
+//------------------------------------------------
+//--- 010 Editor v13.0.1 Binary Template
+//
+//      File: TIL.bt
+//   Authors: Jack Humbert
+//   Version: 1.0
+//   Purpose: Parsing IDA .til files
+//  Category: Reverse Engineering
+// File Mask: *.til
+//  ID Bytes: 49 44 41 54 49 4C
+//   History: 
+//------------------------------------------------
+
+typedef enum {
+TIL_ZIP = 0x0001,
+TIL_MAC = 0x0002,
+TIL_ESI = 0x0004,
+TIL_UNI = 0x0008,
+TIL_ORD = 0x0010,
+TIL_ALI = 0x0020,
+TIL_MOD = 0x0040,
+TIL_STM = 0x0080,
+TIL_SLD = 0x0100
+} EFlag;
+
+typedef enum <ubyte> {
+    IS_VFT = 0x8,
+    IS_CPPOBJ = 0x88,
+    IS_PARENT = 0x28
+} ETYPEATTR;
+
+typedef struct {
+ubyte ZIP : 1;
+ubyte MAC : 1;
+ubyte ESI : 1;
+ubyte UNI : 1;
+ubyte ORD : 1;
+ubyte ALI : 1;
+ubyte MOD : 1;
+ubyte STM : 1;
+ubyte SLD : 1;
+} Flag;
+
+struct {
+
+    byte id[6]; // IDATIL
+    
+    uint form; // 0x12
+    EFlag flag;
+    //local Flag f = flag;
+    
+    ubyte title_len;
+    char title[title_len];
+    
+    ubyte base_len;
+    char base[base_len];
+    
+    ubyte id;
+    ubyte cm;
+    ubyte size_i;
+    ubyte size_b;
+    ubyte size_e;
+    ubyte def_align;
+    
+    if (flag & TIL_ESI) {
+        ubyte size_s;
+        ubyte size_l;
+        ubyte size_ll;
+    }
+    
+    if (flag & TIL_SLD) {
+        ubyte size_ldbl;
+    }
+
+} header;
+
+//ubyte TYPE_BASE_MASK = 0x0F;
+//ubyte TYPE_FLAGS_MASK = 0x30;
+//ubyte TYPE_MODIF_MASK = 0xC0;
+
+
+typedef enum <ubyte> {
+    BT_UNK = 0,
+    BT_VOID = 1,
+    BT_INT8 = 2,
+    BT_INT16 = 3,
+    BT_INT32 = 4,
+    BT_INT64 = 5,
+    BT_INT128 = 6,
+    BT_INT = 7,
+    BT_BOOL = 8,
+    BT_FLOAT = 9,
+    BT_PTR = 0xA,
+    BT_ARRAY = 0xB,
+    BT_FUNC = 0xC,
+    BT_COMPLEX = 0xD,
+    BT_BITFIELD = 0xE,
+    BT_RESERVED = 0xF
+} Base;
+
+typedef enum <ubyte> {
+    BT_SIZE0 = 0x00,
+    BT_SIZE12 = 0x10,
+    BT_SIZE48 = 0x20,
+    BT_SIZE128 = 0x30,
+
+    BT_UNKSIGN_INT8 = 0x02,
+    BT_SIGNED_INT8 = 0x12,
+    BT_UNSIGNED_INT8 = 0x22,
+    BT_CHAR_INT8 = 0x32,
+
+    BT_STD_FLOAT = 0x09,
+    BT_DOUBLE_FLOAT = 0x19,
+    BT_LONG_FLOAT = 0x29,
+    BT_SPECIAL_FLOAT = 0x39,
+
+    BT_DEF_PTR = 0x0A,
+    BT_NEAR_PTR = 0x1A,
+    BT_FAR_PTR = 0x2A,
+    BT_CLOSURE_DEFPTR = 0x3A,
+
+    BT_NONBASED_ARRAY = 0x1B,
+    BT_ARRESERV_ARRAY = 0x2B,
+
+    BT_DEF_FUNC = 0x0C,
+    BT_NEAR_FUNC = 0x1C,
+    BT_FAR_FUNC = 0x2C,
+    BT_INT_FUNC = 0x3C,
+
+    BT_STRUCT = 0x0D,
+    BT_UNION = 0x1D,
+    BT_ENUM = 0x2D,
+    BT_TYPEDEF = 0x3D
+} Type;
+
+typedef enum <ubyte> {
+    BTMT_STRUCT = 0x0,
+    BTMT_UNION = 0x1,
+    BTMT_ENUM = 0x2,
+    BTMT_TYPEDEF = 0x3
+} Complex;
+
+typedef struct {
+    Base base : 4;
+    ubyte flags : 2;
+    ubyte modif : 2;
+} Typ <read=Str(EnumToString(base))>;
+
+
+ushort read_dt() {
+    struct {
+        ubyte B0;
+        local ushort ret <hidden=true> = B0;
+        if (B0 & 0x80) {
+            ubyte B1;
+            local ushort B1_s <hidden=true> = B1;
+            ret = ((B0 & 0x7f) | (B1_s << 7));
+        }
+    } dt <read=Str("%d", ret - 1)>;
+    return dt.ret - 1;
+}
+
+uint64 read_de() {
+    local uint64 DE = 0;
+    local uint64 hi, lo, sign <hidden=true>;
+    while (true) {
+        ubyte B_;
+        hi = DE << 6;
+        sign = (B_ & 0x80);
+        if (!sign) {
+            lo = B_ & 0x3f;
+        } else {
+            lo = 2 * hi;
+            hi = B_ & 0x7f;
+        }
+        DE = lo | hi;
+        if (!sign) {
+            break;
+        }
+    }
+    return DE;
+}
+
+uint64 read_complex_n() {
+    local uint64 n <hidden=true> = read_dt();
+    if (n == 0x7FFE) {
+        n = read_de();    
+    }
+    return n;
+}
+
+typedef struct {
+    local ushort length = read_dt();
+    local string str = "";
+    if (length) {
+        char real_str[length] <hidden=true>;
+        str = real_str;
+    }
+} PString <read=str>;
+
+struct Deserialize;
+
+uint64 parse_type_attr() {
+    ubyte tah;
+    local ubyte tmp <hidden=true> = ((tah & 1) | ((tah >> 3) & 6)) + 1;
+    local uint64 res <hidden=true> = 0;
+    local ubyte shift <hidden=true> = 0;
+    if (tah == 0xFE || tmp == 8) {
+        if (tmp == 8) {
+            res = tmp;
+        }
+        ubyte first_byte;
+        local uint64 next_byte <hidden=true> = first_byte;
+        shift = 0;
+        while (true) {
+            res |= (next_byte & 0x7f) << shift;
+            if ((next_byte & 0x80) == 0) {
+                break;
+            }
+            shift += 7;
+            next_byte = ReadByte(FTell());
+            FSkip(1);    
+            if (next_byte == 0) {
+                Printf("Error");
+                return;
+            }                    
+        }
+    }
+    if (res & 0x0010) {
+        local ushort num_attrs = read_dt();
+        local ushort i <hidden=true> = 0;
+        for (i = 0; i < num_attrs; i++) {
+            struct {
+                PString key();
+                PString value();
+            } attr <optimize=false>;
+        }
+    }
+    return res;
+}
+
+uint64 read_sdacl_attr() {
+    local ubyte sdacl <hidden=true> = ReadByte(FTell());
+    if (((sdacl & ~0x30) ^ 0xC0) <= 0x01) {
+        return parse_type_attr();
+    }
+    return 0;
+}
+
+
+uint64 read_type_attr() {
+    local ubyte tah <hidden=true> = ReadByte(FTell());
+    if (tah == 0xFE) {
+        return parse_type_attr();
+    }
+    return 0;
+}
+
+void argloc() {
+    ubyte a;
+    if (a == 0xFF) {
+        local ushort arg_type = read_dt();
+        if (arg_type == 1) {
+            local uint64 unk = read_de();
+        } else if (arg_type == 2) {
+    
+        } else if (arg_type == 3 || arg_type == 4) {
+            local ushort unk = read_dt();
+            local ushort unk2 = read_dt();
+        } else if (arg_type == 5) {
+            local ushort unk = read_dt();
+            local ushort unk2 = read_de();
+        } else if (arg_type == 6) {
+            local ushort unk2 = read_de();
+        }
+    } else {
+        local ubyte b = (a & 0x7f) - 1;
+        if (b <= 0x80) {
+            
+        } else {
+            ubyte c;
+        }
+    }
+}
+
+typedef struct (uint64 &typeString, uint64 &fields, uint64 &field_comments) {
+    FSeek(typeString);
+    string raw;
+    local ubyte exist <hidden=true> = 0;
+    if (Strlen(raw) > 0) {
+        exist = 1;
+        FSeek(typeString);
+        Typ typ;
+        FSeek(typeString);
+        Type type;
+        if (typ.base <= BT_FLOAT) {
+             return;
+        }
+        if (typ.base == BT_PTR) {
+            if (typ.flags == 0x3) {
+                ubyte ptr_size;
+                if (ptr_size == 0xFF) {
+                    typeString = FTell();
+                    Deserialize pointer(typeString, fields, field_comments);
+                } else {
+                    ubyte based_ptr_size;
+                }
+            }    
+            read_type_attr();
+            typeString = FTell();
+            Deserialize obj_type(typeString, fields, field_comments);
+            return;
+        }
+        if (typ.base == BT_ARRAY) {
+            if (typ.flags & 0x1) {
+                local ushort num_elements = read_dt();
+            } else {
+                local ushort num_elements = read_dt();
+            }
+            typeString = FTell();
+            Deserialize array(typeString, fields, field_comments);
+            return;
+        }
+        if (typ.base == BT_FUNC) {
+            // extract spoiled
+            local ubyte cm = ReadByte(FTell());
+            if ((cm & 0xF0) == 0xA0) {
+                while (true) {
+                    FSkip(1);
+                    if ((cm & ~0xF0) == 15) {
+                        ubyte f_raw;
+                    } else {
+                        local ubyte nspoiled = cm & ~0xF0;
+                        local ubyte i <hidden=true> = 0;
+                        for (i = 0; i < nspoiled; i++) {
+                            ubyte b;
+                            if (b & 0x80) {
+                                ubyte size;
+                            }
+                        }
+                    }
+                    cm = ReadByte(FTell());
+                    if ((cm & 0xF0) != 15) {
+                        break;
+                    }
+                }
+            }
+            ubyte cc;
+            read_type_attr();
+            typeString = FTell();
+            Deserialize return_type(typeString, fields, field_comments);
+            typeString = FTell();
+            if ((cc & 0xF0) > 0xD0) {
+                if ((return_type.type & 0x3F) != 0x01) {
+                    argloc();
+           
+                }
+            }
+
+if ((cc & 0xF0) != 0x20) {
+    local ushort N = read_dt();
+    if (N > 0) {
+        typeString = FTell();
+        struct (uint64 &typeString, uint64 &fields, uint64 &field_comments, ubyte cc) {        
+
+            if (ReadByte(fields)) {
+                FSeek(fields);
+                PString name;
+                fields = FTell();
+            }
+            
+            if (ReadByte(field_comments)) {
+                FSeek(field_comments);
+                PString cmt;
+                field_comments = FTell();
+            }
+            
+            FSeek(typeString);
+
+            local ubyte fah = ReadByte(FTell());
+            if (fah == 0xFF) {
+                FSkip(1);
+                local uint64 flags = read_de();
+            }
+            typeString = FTell();
+            Deserialize type(typeString, fields, field_comments);
+            typeString = FTell();
+            if ((cc & 0xF0) > 0xD0) {
+                argloc();
+            }
+        } arg(typeString, fields, field_comments, cc)[N] <optimize=false>;
+        FSeek(typeString);
+    }
+}
+
+            return;
+        }
+        if (typ.base == BT_COMPLEX) {
+            local uint64 N;
+            if (typ.flags != BTMT_TYPEDEF && typ.flags != BTMT_ENUM) {
+                local uint64 before <hidden=true> = FTell();
+                struct {
+                    ubyte complex_n : 1;
+                    ubyte pack : 2;
+                    ubyte member_count_1 : 4;
+                    local ushort member_count = member_count_1;
+                    ubyte more : 1;
+                    if (more) {
+                        ubyte member_count_2;
+                        member_count |= (ushort)member_count_2 << 4;
+                    }
+                } flags;
+                FSeek(before);
+                N = read_complex_n();
+                if (N == 0) {
+                    if (ReadByte(FTell()) == 0) {
+                        ubyte unk[5];
+                    } else {
+                        PString name();
+                    }
+                    // Printf("Complex Typedef");
+                    //typeString++;
+                    return;
+                }
+            }
+            if (typ.flags == BTMT_STRUCT || typ.flags == BTMT_UNION) {
+                //local uint64 N2 = read_complex_n();
+                if (N == 0) {
+                    Printf("Should be a typedef");
+                    return;
+                }
+                local uint64 pack = N & 7;
+                local uint64 member_count = N >> 3;
+                //if (N2 > 0xFF) {
+                //    member_count = (N2 & 0xFF) >> 5;
+                //}
+
+                local ETYPEATTR attr = read_sdacl_attr();
+                
+                
+                // members
+                local ubyte i <hidden=true> = 0;
+                struct (uint64 &typeString, uint64 &fields, uint64 &field_comments) {
+                    typeString = FTell();
+                    string raw;
+                    local ubyte hasName <hidden=true> = 0;
+                    if (ReadByte(fields)) {
+                        hasName = 1;
+                        FSeek(fields);
+                        PString name;
+                        fields = FTell();
+                    }
+                    if (ReadByte(field_comments)) {
+                        FSeek(field_comments);
+                        PString cmt;
+                        field_comments = FTell();
+                    }
+                    FSeek(typeString);
+                    Deserialize type(typeString, fields, field_comments);
+                    local ETYPEATTR attr = read_sdacl_attr();
+                } member(typeString, fields, field_comments)[member_count] <optimize=false, read=Str("%s (%s)", hasName ? name.str : "", type.exist ? EnumToString(type.typ.base) : "")>;
+                typeString = FTell();
+                return;
+            } else if (typ.flags == BTMT_ENUM) {
+                //if (N == 0) {
+                //    return;
+                //}
+                N = read_complex_n();
+                local uint64 attr = read_type_attr();
+                ubyte bte;
+                local uint delta = 0;
+                struct (uint64 &typeString, uint64 &fields, uint64 &field_comments, uint64 attr, ubyte bte, uint &delta) {
+                    typeString = FTell();
+                    if (ReadByte(fields)) {
+                        FSeek(fields);
+                        PString name;
+                        fields = FTell();
+                        FSeek(typeString);
+                    }
+                    if (ReadByte(field_comments)) {
+                        FSeek(field_comments);
+                        PString cmt;
+                        field_comments = FTell();
+                        FSeek(typeString);
+                    }
+                    local uint64 cur_delta = delta;
+                    local uint64 lo = read_de();
+                    local uint64 hi = 0;
+                    if (attr & 0x0020) {
+                        hi = read_de();
+                    }
+                    local uint64 this_delta = (lo | (hi << 32));
+                    delta += this_delta;
+                    local uint64 value = delta;
+                    if (bte & 0x10) {
+                        local uint64 group_size_add = read_dt();
+                    }
+                } member(typeString, fields, field_comments, attr, bte, delta)[N] <optimize=false>;
+                return;
+            } else if (typ.flags == BTMT_TYPEDEF) {
+                local uint64 num_loc <hidden=true> = FTell() + 2;
+                PString name;
+                if (Strlen(name.str) > 1 && name.str[0] == '#') {
+                    FSeek(num_loc);
+                    if (Strlen(name.str) == 2) {
+                        ubyte raw_ord;
+                        local ubyte ordinal = raw_ord & 0x3F;
+                    }
+                    if (Strlen(name.str) == 3) {
+                        ushort raw_ord;
+                        local ushort ordinal = ((raw_ord >> 8) & 0x3F) | ((raw_ord & 0x0F) << 6);
+                        //local uint64 ordinal = read_complex_n();
+                    }
+                }
+                return;
+            }
+        }
+        FSkip(-1);
+    }
+} Deserialize <read=Str((exist > 0) ? EnumToString(type) : "")>;
+
+void Bucket(uint flag) { 
+    if (flag & TIL_ORD) {
+        uint num_ords;
+    }
+    
+    uint num_defs;
+    uint size;
+    //local ubyte buffer[size];
+    //FSkip(-1);
+    //ubyte last_byte;
+    
+    if (flag & TIL_ZIP) {
+        uint csize;
+        ubyte cbuffer[csize];
+    } else {
+        local uint64 start = FTell();
+        //ubyte buffer[size];
+        //FSkip(-size);
+        struct {
+            uint flags;
+            string name;
+            if (flags >> 31) {
+                uint64 ordinal;
+            } else {
+                uint32 ordinal;
+            }
+            local uint64 typestr_ea <hidden=true> = FTell();
+            string typestr;
+            string cmt;
+            local uint64 fields_ea <hidden=true> = FTell();
+            string fields;
+            local uint64 field_cmts_ea <hidden=true> = FTell();
+            string field_cmts;
+            ubyte sclass;
+            local uint64 end <hidden=true> = FTell();
+            FSeek(typestr_ea);
+            Deserialize type(typestr_ea, fields_ea, field_cmts_ea);
+            FSeek(end);
+        } item[num_defs] <optimize=false, read=Str(name)>;
+        FSeek(start + size);
+    }
+}
+
+struct {
+    struct { Bucket(header.flag & 0xCF); } syms;
+    struct { Bucket(header.flag); } types;
+    struct { Bucket(header.flag & 0xCF); } macros;
+} buckets;
+
+/*
+local uint i = 0;
+
+for( i = 0; i < buckets.syms.num_defs; i++ ) {
+    buckets.syms.buffer
+}
+*/
