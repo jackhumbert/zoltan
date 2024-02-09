@@ -52,15 +52,16 @@ impl TypeResolver {
                 if !self.structs.contains_key(&name.into()) {
                     // if !entity.get_children().is_empty() {
                     let size = entity.get_type().and_then(|t| t.get_sizeof().ok());
+                    let alignment = entity.get_type().and_then(|t| t.get_alignof().ok());
                     let mut ent = None;
                     if let Some(template) = entity.get_template() {
                         self.structs.insert(name.into(), StructType::stub(name));
-                        let res = self.resolve_struct(name, template, size);
+                        let res = self.resolve_struct(name, template, size, alignment);
                         ent = res.ok();
                     } else {
                         if !entity.get_children().is_empty() {
                             self.structs.insert(name.into(), StructType::stub(name));
-                            ent = self.resolve_struct(name, entity, size).ok();
+                            ent = self.resolve_struct(name, entity, size, alignment).ok();
                         }
                     }
                     if ent.is_some() {
@@ -239,6 +240,7 @@ impl TypeResolver {
         name: Ustr,
         entity: clang::Entity,
         size: Option<usize>,
+        alignment: Option<usize>,
     ) -> Result<StructType> {
         let children = entity.get_children();
         // if children.len() == 0 {
@@ -310,13 +312,16 @@ impl TypeResolver {
                 }
                 clang::EntityKind::FieldDecl => {
                     let name = self.get_entity_name(child);
-                    let typ = self.resolve_type(child.get_type().unwrap())?;
+                    let ctyp = child.get_type().unwrap();
+                    let typ = self.resolve_type(ctyp)?;
                     let bit_offset = child.get_offset_of_field().ok();
+                    let alignment = ctyp.get_alignof().ok();
                     members.push(DataMember {
                         name,
                         typ,
                         bit_offset,
                         is_bitfield: child.is_bit_field(),
+                        alignment,
                     })
                 }
                 clang::EntityKind::Method
@@ -389,6 +394,7 @@ impl TypeResolver {
             virtual_methods,
             overridden_virtual_methods,
             size,
+            alignment
         })
     }
 
@@ -530,19 +536,23 @@ impl TypeResolver {
         for child in children {
             if child.get_kind() == clang::EntityKind::FieldDecl {
                 let name = self.get_entity_name(child);
-                let typ = self.resolve_type(child.get_type().unwrap())?;
+                let ctyp = child.get_type().unwrap();
+                let typ = self.resolve_type(ctyp)?;
                 let bit_offset = child.get_offset_of_field().ok();
+                let alignment = ctyp.get_alignof().ok();
                 members.push(DataMember {
                     name,
                     typ,
                     bit_offset,
                     is_bitfield: false,
+                    alignment,
                 })
             }
         }
 
         let size = entity.get_type().unwrap().get_sizeof().ok();
-        Ok(UnionType { name, members, size })
+        let alignment = entity.get_type().unwrap().get_sizeof().ok();
+        Ok(UnionType { name, members, size, alignment })
     }
 
     fn resolve_function(&mut self, typ: clang::Type) -> Result<FunctionType> {

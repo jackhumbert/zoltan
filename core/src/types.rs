@@ -206,8 +206,8 @@ impl Hash for StructId {
 
 impl Eq for StructId {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
-pub struct UnionId(Ustr);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash, Ord, PartialOrd)]
+pub struct UnionId(pub Ustr);
 
 impl fmt::Display for UnionId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -216,7 +216,7 @@ impl fmt::Display for UnionId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRef, From, Hash, Ord, PartialOrd)]
 pub struct EnumId(Ustr);
 
 impl fmt::Display for EnumId {
@@ -268,6 +268,7 @@ pub struct DataMember {
     pub typ: Type,
     pub bit_offset: Option<usize>,
     pub is_bitfield: bool,
+    pub alignment: Option<usize>,
 }
 
 impl DataMember {
@@ -277,6 +278,7 @@ impl DataMember {
             typ,
             bit_offset: None,
             is_bitfield: false,
+            alignment: None
         }
     }
 }
@@ -291,6 +293,7 @@ pub struct StructType {
     pub virtual_methods: Vec<Method>,
     pub overridden_virtual_methods: Vec<Method>,
     pub size: Option<usize>,
+    pub alignment: Option<usize>,
 }
 
 impl StructType {
@@ -304,6 +307,7 @@ impl StructType {
             virtual_methods: vec![],
             overridden_virtual_methods: vec![],
             size: None,
+            alignment: None,
         }
     }
 
@@ -356,6 +360,7 @@ pub struct UnionType {
     pub name: Ustr,
     pub members: Vec<DataMember>,
     pub size: Option<usize>,
+    pub alignment: Option<usize>,
 }
 
 #[derive(Debug)]

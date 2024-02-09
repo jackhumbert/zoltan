@@ -10,7 +10,9 @@ use ustr::Ustr;
 
 use crate::error::{Result, SymbolError};
 use crate::symbols::FunctionSymbol;
-use crate::types::{FunctionEnum, StructId, StructType, Type, TypeInfo};
+use crate::types::{
+    EnumId, EnumType, FunctionEnum, StructId, StructType, Type, TypeInfo, UnionId, UnionType
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionError {
@@ -373,9 +375,7 @@ pub fn write_rust_header<W: Write>(mut output: W, symbols: &[FunctionSymbol]) ->
 }
 
 pub fn format_name_for_idc(s: &str) -> String {
-    s.replace("RED4ext::", "")
-        .replace("::", "")
-        .replace('<', "_")
+    s.replace('<', "_")
         .replace('>', "")
         .replace(',', "_")
         .replace('*', "_p")
@@ -772,7 +772,10 @@ pub fn write_til_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
             .collect::<Vec<&Type>>()
         {
             if let Some(stid) = get_struct_id_from_type(typ) {
-                if !type_refs.contains_key(&stid.to_string()) && !info.structs.contains_key(stid) {
+                if !type_refs.contains_key(&stid.to_string()) && !info.structs.contains_key(stid)
+                // && !info.unions.contains_key(&UnionId(typ.name().to_string().into())
+                // && !info.enums.contains_key(&EnumId(stid.to_string().into())
+                {
                     let mut type_buffer = Vec::<u8>::new();
                     type_buffer.write_type_stub(&Type::Struct(*stid))?;
                     type_refs.insert(stid.to_string(), type_buffer);
@@ -787,7 +790,15 @@ pub fn write_til_types<W: Write>(mut out: W, info: &TypeInfo) -> Result<()> {
     }
 
     for id in info.structs.keys().sorted() {
-        num_types += types_buffer.write_type(&id, &info.structs[id])?;
+        num_types += types_buffer.write_struct(id, &info.structs[id], &info)?;
+    }
+
+    for id in info.unions.keys().sorted() {
+        num_types += types_buffer.write_union(id, &info.unions[id])?;
+    }
+
+    for id in info.enums.keys().sorted() {
+        num_types += types_buffer.write_enum(id, &info.enums[id])?;
     }
 
     out.write(&num_types.to_le_bytes())?;
@@ -816,9 +827,15 @@ pub fn get_struct_id_from_type(typ: &Type) -> Option<&StructId> {
         Type::Long(_) => None,
         Type::Float => None,
         Type::Double => None,
-        Type::Pointer(inner_type) | Type::Reference(inner_type) => get_struct_id_from_type(std::rc::Rc::try_unwrap(inner_type.into()).unwrap()),
-        Type::Array(inner_type) => get_struct_id_from_type(std::rc::Rc::try_unwrap(inner_type.into()).unwrap()),
-        Type::FixedArray(inner_type, _) => get_struct_id_from_type(std::rc::Rc::try_unwrap(inner_type.into()).unwrap()),
+        Type::Pointer(inner_type) | Type::Reference(inner_type) => {
+            get_struct_id_from_type(std::rc::Rc::try_unwrap(inner_type.into()).unwrap())
+        }
+        Type::Array(inner_type) => {
+            get_struct_id_from_type(std::rc::Rc::try_unwrap(inner_type.into()).unwrap())
+        }
+        Type::FixedArray(inner_type, _) => {
+            get_struct_id_from_type(std::rc::Rc::try_unwrap(inner_type.into()).unwrap())
+        }
         Type::Function(_) => None,
         Type::Union(_) => None,
         Type::Struct(id) => Some(id),
@@ -830,11 +847,15 @@ pub fn get_struct_id_from_type(typ: &Type) -> Option<&StructId> {
 }
 
 pub trait TilWriter {
-    fn write_type(&mut self, id: &StructId, ty: &StructType) -> Result<u32>;
+    fn write_struct(&mut self, id: &StructId, ty: &StructType, type_info: &TypeInfo) -> Result<u32>;
+    fn write_union(&mut self, id: &UnionId, ty: &UnionType) -> Result<u32>;
+    fn write_enum(&mut self, id: &EnumId, ty: &EnumType) -> Result<u32>;
+    fn write_idc_typedef(&mut self, idc_name: &str, name: &str) -> Result<u32>;
     fn write_type_stub(&mut self, id: &Type) -> Result<u32>;
     fn write_vtbl(&mut self, id: &StructId, ty: &StructType) -> Result<u32>;
     fn write_type_ref(&mut self, typ: &Type) -> Result<()>;
     fn write_p_string(&mut self, value: &str) -> Result<()>;
+    fn write_enum_delta(&mut self, value: i64) -> Result<()>;
     fn write_complex_n(&mut self, value: usize) -> Result<()>;
 }
 
@@ -849,7 +870,7 @@ where
         let flags: u32 = 0x7FFFFFFF;
         type_buffer.write(&flags.to_le_bytes())?;
 
-        write!(type_buffer, "{id}_vtbl\0")?;
+        write!(type_buffer, "{}_vtbl\0", format_name_for_idc(&id.to_string()))?;
 
         let ordinal: u32 = 0;
         type_buffer.write(&ordinal.to_le_bytes())?;
@@ -862,38 +883,38 @@ where
         let type_flag: u8 = 0x0D; // struct
         type_string.write(&type_flag.to_le_bytes())?;
 
-        let mut num_children = ty.virtual_methods.len() + ty.base.len();
-        let struct_flags: usize = num_children << 3;
+        let num_children = ty.virtual_methods.len() + ty.base.first().and(Some(1)).unwrap_or(0);
+        let mut struct_flags: usize = num_children << 3;
+        struct_flags |= 0x1; // regular packing
         type_string.write_complex_n(struct_flags)?;
 
         let fah_byte: u8 = 0xF1;
         type_string.write(&fah_byte.to_le_bytes())?;
 
         let attr_flags: usize = 0x100; // VFT
-        type_string.write_complex_n(attr_flags - 1)?;
+        type_string.write_complex_n(attr_flags)?;
 
         // if num_children != 0 {
         //     let fah_byte: u8 = 0xF1;
         //     type_string.write(&fah_byte.to_le_bytes())?;
 
         //     let attr_flags: usize = 0x80; // __cppobj
-        //     type_string.write_complex_n(attr_flags - 1)?;
+        //     type_string.write_complex_n(attr_flags)?;
         // }
 
-        if !ty.base.is_empty() {
-            for b in &ty.base {
-                let type_flag: u8 = 0x3D;
-                type_string.write(&type_flag.to_le_bytes())?;
+        if let Some(b) = ty.base.first() {
+            let type_flag: u8 = 0x3D;
+            type_string.write(&type_flag.to_le_bytes())?;
 
-                type_string.write_p_string(&(b.to_string() + "_vtbl"))?;
-                field_string.write_p_string("")?;
+            let base_name = format_name_for_idc(&b.to_string());
+            type_string.write_p_string(&(base_name + "_vtbl"))?;
+            field_string.write_p_string("")?;
 
-                let fah_byte: u8 = 0xF1;
-                type_string.write(&fah_byte.to_le_bytes())?;
+            let fah_byte: u8 = 0xF1;
+            type_string.write(&fah_byte.to_le_bytes())?;
 
-                let attr_flags: usize = 0x20; // type inherits from
-                type_string.write_complex_n(attr_flags - 1)?;
-            }
+            let attr_flags: usize = 0x20; // type inherits from
+            type_string.write_complex_n(attr_flags)?;
         }
 
         for v in &ty.virtual_methods {
@@ -910,7 +931,7 @@ where
 
             type_string.write_type_ref(&v.typ.return_type)?;
 
-            let arg_length = v.typ.params.len() + 1;
+            let arg_length = v.typ.params.len() + 1 + 1;
             type_string.write_complex_n(arg_length)?;
 
             let type_flag: u8 = 0xFF; // has attr
@@ -944,6 +965,46 @@ where
         self.write(&type_buffer)?;
 
         Ok(types_added)
+    }
+
+    fn write_idc_typedef(self: &mut W, idc_name: &str, name: &str) -> Result<u32> {
+        let flags: u32 = 0x7FFFFFFF;
+        self.write(&flags.to_le_bytes())?;
+
+        write!(self, "{name}\0")?;
+
+        let ordinal: u32 = 0;
+        self.write(&ordinal.to_le_bytes())?;
+
+        let mut type_string = Vec::<u8>::new();
+        let mut comment_string = Vec::<u8>::new();
+        let mut field_string = Vec::<u8>::new();
+        let mut field_comment_string = Vec::<u8>::new();
+
+        let type_flag: u8 = 0x3D; // typedef
+        type_string.write(&type_flag.to_le_bytes())?;
+
+        type_string.write_p_string(&idc_name)?;
+
+        // let type_flag: u8 = 0xFF;
+        // type_string.write(&type_flag.to_le_bytes())?;
+        // let type_flag: u8 = 0xFF;
+        // type_string.write(&type_flag.to_le_bytes())?;
+        // let type_flag: u8 = 0x40;
+        // type_string.write(&type_flag.to_le_bytes())?;
+
+        self.write(&type_string)?;
+        write!(self, "\0")?;
+        self.write(&comment_string)?;
+        write!(self, "\0")?;
+        self.write(&field_string)?;
+        write!(self, "\0")?;
+        self.write(&field_comment_string)?;
+        write!(self, "\0")?;
+
+        write!(self, "\0")?;
+
+        Ok(1)
     }
 
     fn write_type_stub(self: &mut W, id: &Type) -> Result<u32> {
@@ -984,14 +1045,19 @@ where
         Ok(1)
     }
 
-    fn write_type(self: &mut W, id: &StructId, ty: &StructType) -> Result<u32> {
+    fn write_struct(self: &mut W, id: &StructId, ty: &StructType, type_info: &TypeInfo) -> Result<u32> {
         let mut types_added = 0;
         let mut type_buffer = Vec::<u8>::new();
 
         let flags: u32 = 0x7FFFFFFF;
         type_buffer.write(&flags.to_le_bytes())?;
 
-        write!(type_buffer, "{id}\0")?;
+        let name = id.to_string();
+        let idc_safe_name = format_name_for_idc(&name);
+        if idc_safe_name != name {
+            types_added += self.write_idc_typedef(&idc_safe_name, &name)?;
+        }
+        write!(type_buffer, "{}\0", idc_safe_name)?;
 
         let ordinal: u32 = 0;
         type_buffer.write(&ordinal.to_le_bytes())?;
@@ -1008,7 +1074,17 @@ where
         if ty.has_direct_virtual_methods() && ty.base.len() == 0 {
             num_children += 1;
         }
-        let struct_flags: usize = num_children << 3;
+        let mut struct_flags: usize = num_children << 3;
+        struct_flags |= ty.alignment.unwrap_or(1).ilog2().try_into().unwrap_or(0) + 2; // packed
+
+        // 1  0 1
+        // 2  1 1
+        // 4  0 2
+        // 8  1 2
+        // 16 0 3
+        // 32 1 3
+        // 64 0 0
+
         type_string.write_complex_n(struct_flags)?;
 
         if ty.base.len() != 0 || ty.members.len() != 0 || ty.has_direct_virtual_methods() {
@@ -1016,14 +1092,17 @@ where
             type_string.write(&fah_byte.to_le_bytes())?;
 
             let attr_flags: usize = 0x80; // __cppobj
-            type_string.write_complex_n(attr_flags - 1)?;
+            type_string.write_complex_n(attr_flags)?;
         }
 
         if ty.base.len() != 0 {
             field_comment_string.write("\x04\x052.".as_bytes())?;
         }
 
-        if ty.has_direct_virtual_methods() {
+        if ty.has_virtual_methods(&type_info) {
+            if idc_safe_name != name {
+                types_added += self.write_idc_typedef(&(idc_safe_name + "_vtbl"), &(name + "_vtbl"))?;
+            }
             types_added += self.write_vtbl(&id, &ty)?;
         }
 
@@ -1039,8 +1118,7 @@ where
                 type_string.write(&fah_byte.to_le_bytes())?;
 
                 let attr_flags: usize = 0x20; // type inherits from
-                type_string.write_complex_n(attr_flags - 1)?;
-
+                type_string.write_complex_n(attr_flags)?;
             }
         } else if ty.has_direct_virtual_methods() {
             let type_flag: u8 = 0x0A; // pointer
@@ -1056,7 +1134,87 @@ where
             type_string.write(&fah_byte.to_le_bytes())?;
 
             let attr_flags: usize = 0x100; // vft
-            type_string.write_complex_n(attr_flags - 1)?;
+            type_string.write_complex_n(attr_flags)?;
+        }
+
+        let mut i = 3;
+        for m in &ty.members {
+            type_string.write_type_ref(&m.typ)?;
+
+            // might not be needed
+            // let tah_bytes: Vec<u8> = match m.alignment {
+            //     Some(1)  => vec![0xC0],
+            //     Some(2)  => vec![0xC1],
+            //     Some(4)  => vec![0xD0],
+            //     Some(8)  => vec![0xD1],
+            //     Some(16) => vec![0xE0],
+            //     Some(32) => vec![0xE1],
+            //     Some(64) => vec![0xF0],
+            //     // 128  0xF1 0x08
+            //     // 256  0xF1 0x09
+            //     Some(_)  => vec![0xD1],
+            //     None => vec![]
+            // };
+            // type_string.write(&tah_bytes)?;
+
+            field_string.write_p_string(&m.name)?;
+
+            let field_comment = format!("\x05{}.", i);
+            field_comment_string.write_p_string(&field_comment)?;
+            i += 1;
+        }
+
+        type_buffer.write(&type_string)?;
+        write!(type_buffer, "\0")?;
+        type_buffer.write(&comment_string)?;
+        write!(type_buffer, "\0")?;
+        type_buffer.write(&field_string)?;
+        write!(type_buffer, "\0")?;
+        type_buffer.write(&field_comment_string)?;
+        write!(type_buffer, "\0")?;
+
+        write!(type_buffer, "\0")?;
+
+        types_added += 1;
+
+        self.write(&type_buffer)?;
+
+        Ok(types_added)
+    }
+
+    fn write_union(&mut self, id: &UnionId, ty: &UnionType) -> Result<u32> {
+        let types_added: u32 = 0;
+
+        let mut types_added = 0;
+        let mut type_buffer = Vec::<u8>::new();
+
+        let flags: u32 = 0x7FFFFFFF;
+        type_buffer.write(&flags.to_le_bytes())?;
+
+        write!(type_buffer, "{}\0", id.to_string())?;
+
+        let ordinal: u32 = 0;
+        type_buffer.write(&ordinal.to_le_bytes())?;
+
+        let mut type_string = Vec::<u8>::new();
+        let mut comment_string = Vec::<u8>::new();
+        let mut field_string = Vec::<u8>::new();
+        let mut field_comment_string = Vec::<u8>::new();
+
+        let type_flag: u8 = 0x1D; // union
+        type_string.write(&type_flag.to_le_bytes())?;
+
+        let num_children = ty.members.len();
+        let mut union_flags: usize = num_children << 3;
+        union_flags |= ty.alignment.unwrap_or(1).ilog2().try_into().unwrap_or(0) + 1; // packed
+        type_string.write_complex_n(union_flags)?;
+
+        if ty.members.len() != 0 {
+            let fah_byte: u8 = 0xF1;
+            type_string.write(&fah_byte.to_le_bytes())?;
+
+            let attr_flags: usize = 0x80; // __cppobj
+            type_string.write_complex_n(attr_flags)?;
         }
 
         let mut i = 3;
@@ -1067,6 +1225,70 @@ where
             let field_comment = format!("\x05{}.", i);
             field_comment_string.write_p_string(&field_comment)?;
             i += 1;
+        }
+
+        type_buffer.write(&type_string)?;
+        write!(type_buffer, "\0")?;
+        type_buffer.write(&comment_string)?;
+        write!(type_buffer, "\0")?;
+        type_buffer.write(&field_string)?;
+        write!(type_buffer, "\0")?;
+        type_buffer.write(&field_comment_string)?;
+        write!(type_buffer, "\0")?;
+
+        write!(type_buffer, "\0")?;
+
+        types_added += 1;
+
+        self.write(&type_buffer)?;
+
+        Ok(types_added)
+    }
+
+    fn write_enum(&mut self, id: &EnumId, ty: &EnumType) -> Result<u32> {
+        let types_added: u32 = 0;
+
+        let mut types_added = 0;
+        let mut type_buffer = Vec::<u8>::new();
+
+        let flags: u32 = 0x7FFFFFFF;
+        type_buffer.write(&flags.to_le_bytes())?;
+
+        write!(type_buffer, "{}\0", id.to_string())?;
+
+        let ordinal: u32 = 0;
+        type_buffer.write(&ordinal.to_le_bytes())?;
+
+        let mut type_string = Vec::<u8>::new();
+        let mut comment_string = Vec::<u8>::new();
+        let mut field_string = Vec::<u8>::new();
+        let mut field_comment_string = Vec::<u8>::new();
+
+        let type_flag: u8 = 0x2D; // enum
+        type_string.write(&type_flag.to_le_bytes())?;
+
+        let num_children = ty.members.len();
+        let enum_flags: usize = num_children | 0x01; // regular packing
+        type_string.write_complex_n(enum_flags)?;
+
+        if ty.members.len() != 0 {
+            let fah_byte: u8 = 0xFE;
+            type_string.write(&fah_byte.to_le_bytes())?;
+
+            let attr_flags: u8 = 0x40;
+            type_string.write(&attr_flags.to_le_bytes())?;
+
+            let mut bte: u8 = ty.size.unwrap_or(1).ilog2().try_into().unwrap_or(0) + 1;
+            bte |= 0x80;
+            type_string.write(&bte.to_le_bytes())?;
+        }
+
+        let mut last_value = 0;
+        for m in &ty.members {
+            let delta = m.value - last_value;
+            last_value = m.value;
+            type_string.write_enum_delta(delta)?;
+            field_string.write_p_string(&m.name)?;
         }
 
         type_buffer.write(&type_string)?;
@@ -1138,7 +1360,7 @@ where
             Type::FixedArray(inner_type, size) => {
                 let type_id: u8 = 0x1B;
                 self.write(&type_id.to_le_bytes())?;
-                self.write_complex_n(*size)?;
+                self.write_complex_n(*size + 1)?;
                 self.write_type_ref(std::rc::Rc::try_unwrap(inner_type.into()).unwrap())?;
             }
             Type::Function(_) => {
@@ -1148,7 +1370,8 @@ where
             Type::Union(_) | Type::Struct(_) | Type::Enum(_) => {
                 let type_id: u8 = 0x3D;
                 self.write(&type_id.to_le_bytes())?;
-                self.write_p_string(&typ.name())?;
+                let safe_name = format_name_for_idc(&typ.name());
+                self.write_p_string(&safe_name)?;
             }
             Type::Constant(inner_type) => {
                 self.write_type_ref(std::rc::Rc::try_unwrap(inner_type.into()).unwrap())?;
@@ -1159,22 +1382,55 @@ where
     }
 
     fn write_p_string(self: &mut W, value: &str) -> Result<()> {
-        self.write_complex_n(value.len())?;
+        self.write_complex_n(value.len() + 1)?;
         self.write(value.as_bytes())?;
 
         Ok(())
     }
 
-    fn write_complex_n(self: &mut W, value: usize) -> Result<()> {
-        if value <= 0x7E {
-            let adjusted = value + 1;
-            let converted: u8 = (adjusted).try_into().unwrap();
-            self.write(&converted.to_le_bytes())?;
-        } else if value <= 0xFFFE {
-            let adjusted = value + 1;
+    fn write_enum_delta(self: &mut W, value: i64) -> Result<()> {
+        if value < (1 << 6) {
+            let converted: u8 = (value).try_into().unwrap();
+            self.write(&(converted | 0x40).to_le_bytes())?;
+        } else if value < (1 << 13) {
             let mut converted = Vec::<u8>::new();
-            converted.push(((adjusted & 0x7f) | 0x80).try_into().unwrap());
-            converted.push(((adjusted >> 7) & 0xFF).try_into().unwrap());
+            converted.push((((value >> 6) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value) & 0x3F) | 0x40).try_into().unwrap());
+            self.write(&converted)?;
+        } else if value < (1 << 20) {
+            let mut converted = Vec::<u8>::new();
+            converted.push((((value >> 13) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value >> 6) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value) & 0x3F) | 0x40).try_into().unwrap());
+            self.write(&converted)?;
+        } else if value < (1 << 27) {
+            let mut converted = Vec::<u8>::new();
+            converted.push((((value >> 20) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value >> 13) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value >> 6) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value) & 0x3F) | 0x40).try_into().unwrap());
+            self.write(&converted)?;
+        } else {
+            let mut converted = Vec::<u8>::new();
+            converted.push((((value >> 27) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value >> 20) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value >> 13) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value >> 6) & 0xFF) | 0x80).try_into().unwrap());
+            converted.push((((value) & 0x3F) | 0x40).try_into().unwrap());
+            self.write(&converted)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_complex_n(self: &mut W, value: usize) -> Result<()> {
+        if value <= 0x7F {
+            let converted: u8 = (value).try_into().unwrap();
+            self.write(&converted.to_le_bytes())?;
+        } else if value <= 0xFFFF {
+            let mut converted = Vec::<u8>::new();
+            converted.push(((value & 0x7f) | 0x80).try_into().unwrap());
+            converted.push(((value >> 7) & 0xFF).try_into().unwrap());
             self.write(&converted)?;
         } else {
         }
